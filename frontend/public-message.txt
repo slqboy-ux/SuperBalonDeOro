@@ -1,0 +1,5 @@
+Probá la liga casual de amigos: SuperBalon MVP
+
+Ingresá jugadores, generá equipos, cargá resultados y mirá la tabla.
+
+URL de prueba: http://localhost:8000/

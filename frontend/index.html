@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SUPERBALON DE ORO</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-wrap">
+          <span class="brand-pill">Live</span>
+          <div>
+            <p class="eyebrow">Liga casual entre amigos</p>
+            <h1 id="brandTitle">SUPERBALON DE ORO</h1>
+          </div>
+        </div>
+        <button id="resetBtn" class="danger-btn">Reiniciar temporada</button>
+      </header>
+
+      <section class="hero panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Temporada activa</p>
+          <h2 id="seasonName">Temporada 2026</h2>
+          <p id="tagline" class="tagline">Pega la lista de amigos, arma equipos y seguí la tabla en segundos.</p>
+          <div class="quick-pills">
+            <span>Sin planillas</span>
+            <span>Equipos rápidos</span>
+            <span>Puntaje individual</span>
+          </div>
+        </div>
+        <div class="hero-actions">
+          <input id="seasonInput" type="text" placeholder="Nombre de la temporada" />
+          <button id="saveSeasonBtn">Guardar</button>
+        </div>
+      </section>
+
+      <main class="grid">
+        <section class="panel summary-card">
+          <div class="panel-header">
+            <p class="eyebrow">Resumen</p>
+            <h2>Estado de la liga</h2>
+          </div>
+
+          <div class="summary-grid">
+            <div>
+              <span>Jugadores</span>
+              <strong id="totalPlayers">0</strong>
+            </div>
+            <div>
+              <span>Equipos</span>
+              <strong id="totalTeams">0</strong>
+            </div>
+            <div>
+              <span>Partidos</span>
+              <strong id="totalMatches">0</strong>
+            </div>
+          </div>
+
+          <div id="championBox" class="champion-box">
+            <span>Campeón</span>
+            <strong id="championName">Sin resultados</strong>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <p class="eyebrow">Paso 1</p>
+            <h2>Jugadores</h2>
+          </div>
+
+          <div class="bulk-box">
+            <label for="bulkPlayersInput">Pegá la lista de tus amigos</label>
+            <p class="helper-text">No hace falta cargar uno por uno. Pega la lista del grupo y listo.</p>
+            <textarea id="bulkPlayersInput" placeholder="Dani, Javi, Leo&#10;Tomi&#10;Nico&#10;1. Bruno&#10;2. Ove"></textarea>
+            <div class="bulk-actions">
+              <button id="bulkAddPlayersBtn" type="button">Cargar lista</button>
+              <button id="copyPlayersBtn" class="ghost-btn" type="button">Copiar lista</button>
+            </div>
+          </div>
+
+          <div class="row single-input">
+            <input id="playerName" type="text" placeholder="Nombre del jugador" />
+            <button id="addPlayerBtn">Agregar</button>
+          </div>
+          <ul id="playerList" class="list"></ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <p class="eyebrow">Paso 2</p>
+            <h2>Armar equipos</h2>
+          </div>
+          <div class="row compact">
+            <label for="teamSize">Jugadores por equipo</label>
+            <input id="teamSize" type="number" min="1" max="10" value="2" />
+          </div>
+          <button id="generateTeamsBtn" class="secondary-btn">Generar equipos</button>
+          <div id="teamList" class="team-list"></div>
+        </section>
+
+        <section class="panel panel-wide">
+          <div class="panel-header">
+            <p class="eyebrow">Paso 3</p>
+            <h2>Guardar resultado</h2>
+          </div>
+          <div class="result-form">
+            <select id="homeTeamSelect"></select>
+            <input id="homeGoals" type="number" min="0" value="0" />
+            <span class="vs-text">vs</span>
+            <input id="awayGoals" type="number" min="0" value="0" />
+            <select id="awayTeamSelect"></select>
+            <button id="saveMatchBtn">Guardar partido</button>
+          </div>
+
+          <div class="matches-box">
+            <h3>Partidos cargados</h3>
+            <ul id="matchList" class="list matches"></ul>
+          </div>
+        </section>
+
+        <section class="panel panel-wide">
+          <div class="panel-header">
+            <p class="eyebrow">Paso 4</p>
+            <h2>Puntaje individual</h2>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Pos</th>
+                <th>Jugador</th>
+                <th>PJ</th>
+                <th>PG</th>
+                <th>PE</th>
+                <th>PP</th>
+                <th>GF</th>
+                <th>GC</th>
+                <th>DG</th>
+                <th>Pts</th>
+              </tr>
+            </thead>
+            <tbody id="standingsBody"></tbody>
+          </table>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
