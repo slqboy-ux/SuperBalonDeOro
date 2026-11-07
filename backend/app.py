@@ -9,8 +9,17 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-DB_PATH = Path(__file__).resolve().parent / "data.db"
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "data.db"
+
+frontend_candidates = [
+    BASE_DIR / "frontend",
+    BASE_DIR.parent / "frontend",
+]
+FRONTEND_DIR = next((candidate for candidate in frontend_candidates if candidate.exists()), frontend_candidates[0])
+
+if not FRONTEND_DIR.exists():
+    raise RuntimeError(f"Frontend directory not found. Checked: {[str(path) for path in frontend_candidates]}")
 
 app = FastAPI(title="SuperBalon MVP", version="0.1.0")
 
