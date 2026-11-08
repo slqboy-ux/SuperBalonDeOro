@@ -1,2 +1,3 @@
 #!/usr/bin/env bash
-python app.py
+export PORT="${PORT:-8000}"
+exec python app.py

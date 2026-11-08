@@ -7,7 +7,21 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <div id="groupGate" class="gate-screen">
+      <div class="gate-card">
+        <p class="eyebrow">Acceso</p>
+        <h2>Elegí tu grupo</h2>
+        <div id="groupGateList" class="group-gate-list"></div>
+
+        <div class="group-create-box">
+          <input id="newGroupName" type="text" placeholder="Nombre del grupo" />
+          <input id="newGroupPassword" type="password" placeholder="Contraseña (opcional)" />
+          <button id="createGroupGateBtn" type="button">Crear grupo</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="appShell" class="app-shell hidden">
       <header class="topbar">
         <div class="brand-wrap">
           <span class="brand-pill">Live</span>
@@ -16,7 +30,10 @@
             <h1 id="brandTitle">SUPERBALON DE ORO</h1>
           </div>
         </div>
-        <button id="resetBtn" class="danger-btn">Reiniciar temporada</button>
+        <div class="topbar-actions">
+          <button id="clearPlayersBtn" class="ghost-btn small-btn" type="button">Vaciar lista</button>
+          <button id="resetBtn" class="danger-btn">Reiniciar temporada</button>
+        </div>
       </header>
 
       <section class="hero panel">
@@ -31,6 +48,20 @@
           </div>
         </div>
         <div class="hero-actions">
+          <div class="context-grid">
+            <div class="context-field">
+              <label for="groupSelect">Grupo</label>
+              <select id="groupSelect"></select>
+            </div>
+            <div class="context-field">
+              <label for="seasonSelect">Temporada</label>
+              <select id="seasonSelect"></select>
+            </div>
+          </div>
+          <div class="context-actions">
+            <button id="newGroupBtn" class="ghost-btn small-btn" type="button">Nuevo grupo</button>
+            <button id="newSeasonBtn" class="ghost-btn small-btn" type="button">Nueva temporada</button>
+          </div>
           <input id="seasonInput" type="text" placeholder="Nombre de la temporada" />
           <button id="saveSeasonBtn">Guardar</button>
         </div>
@@ -96,7 +127,9 @@
             <label for="teamSize">Jugadores por equipo</label>
             <input id="teamSize" type="number" min="1" max="10" value="2" />
           </div>
+          <p class="helper-text">Para una nueva fecha, podés volver a generar equipos y seguir cargando partidos; la tabla acumula los resultados anteriores.</p>
           <button id="generateTeamsBtn" class="secondary-btn">Generar equipos</button>
+          <button id="shareTeamsBtn" class="secondary-btn ghost-btn share-btn" type="button">Compartir equipos</button>
           <div id="teamList" class="team-list"></div>
         </section>
 
@@ -115,7 +148,8 @@
           </div>
 
           <div class="matches-box">
-            <h3>Partidos cargados</h3>
+            <h3>Historial de partidos</h3>
+            <p class="helper-text">Se acumulan los resultados de la temporada para que quede visible el historial del grupo.</p>
             <ul id="matchList" class="list matches"></ul>
           </div>
         </section>

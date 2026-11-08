@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 import sqlite3
 from pathlib import Path
@@ -10,7 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "data.db"
+DEFAULT_DB_PATH = BASE_DIR / "data.db"
+DB_PATH = Path(os.environ.get("SUPERBALON_DB_PATH", str(DEFAULT_DB_PATH)))
 
 frontend_candidates = [
     BASE_DIR / "frontend",
@@ -38,6 +40,14 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def ensure_column(table_name: str, column_name: str, column_sql: str) -> None:
+    with get_conn() as conn:
+        columns = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        if not any(column[1] == column_name for column in columns):
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
+        conn.commit()
+
+
 def init_db() -> None:
     with get_conn() as conn:
         conn.execute(
@@ -51,10 +61,35 @@ def init_db() -> None:
 
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                password TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS seasons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS players (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                name TEXT NOT NULL,
+                group_id INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(name, group_id)
             )
             """
         )
@@ -63,7 +98,9 @@ def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS teams (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                group_id INTEGER NOT NULL DEFAULT 1,
+                season_id INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
             """
@@ -85,6 +122,8 @@ def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS matches (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL DEFAULT 1,
+                season_id INTEGER NOT NULL DEFAULT 1,
                 home_team_id INTEGER NOT NULL,
                 away_team_id INTEGER NOT NULL,
                 home_goals INTEGER NOT NULL DEFAULT 0,
@@ -101,12 +140,70 @@ def init_db() -> None:
             "season_name": "Temporada 2026",
             "tagline": "Pega la lista de amigos, arma equipos y seguí la tabla en segundos.",
             "brand": "SUPERBALON DE ORO",
+            "current_group_id": "1",
+            "current_season_id": "1",
         }
         for key, value in defaults.items():
             conn.execute(
                 "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, value),
             )
+
+        group_count = conn.execute("SELECT COUNT(*) AS total FROM groups").fetchone()["total"]
+        if group_count == 0:
+            group_cursor = conn.execute("INSERT INTO groups (name) VALUES (?)", ("Mi grupo",))
+            default_group_id = group_cursor.lastrowid
+            conn.execute(
+                "INSERT INTO seasons (group_id, name) VALUES (?, ?)",
+                (default_group_id, "Primer Temporada"),
+            )
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                ("current_group_id", str(default_group_id)),
+            )
+            season_row = conn.execute(
+                "SELECT id FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
+                (default_group_id,),
+            ).fetchone()
+            if season_row:
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    ("current_season_id", str(season_row["id"])),
+                )
+
+        if group_count == 0 or conn.execute("SELECT COUNT(*) FROM seasons").fetchone()[0] == 0:
+            existing_group = conn.execute("SELECT id FROM groups ORDER BY id ASC LIMIT 1").fetchone()
+            if existing_group:
+                conn.execute(
+                    "INSERT INTO seasons (group_id, name) VALUES (?, ?)",
+                    (existing_group["id"], "Primer Temporada"),
+                )
+                current_season = conn.execute(
+                    "SELECT id FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
+                    (existing_group["id"],),
+                ).fetchone()
+                if current_season:
+                    conn.execute(
+                        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        ("current_season_id", str(current_season["id"])),
+                    )
+
+        ensure_column("groups", "password", "TEXT DEFAULT ''")
+        ensure_column("players", "group_id", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column("teams", "group_id", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column("teams", "season_id", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column("matches", "group_id", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column("matches", "season_id", "INTEGER NOT NULL DEFAULT 1")
+
+        conn.execute(
+            "UPDATE players SET group_id = COALESCE(group_id, 1) WHERE group_id IS NULL"
+        )
+        conn.execute(
+            "UPDATE teams SET group_id = COALESCE(group_id, 1), season_id = COALESCE(season_id, 1) WHERE group_id IS NULL OR season_id IS NULL"
+        )
+        conn.execute(
+            "UPDATE matches SET group_id = COALESCE(group_id, 1), season_id = COALESCE(season_id, 1) WHERE group_id IS NULL OR season_id IS NULL"
+        )
 
         conn.commit()
 
@@ -121,30 +218,107 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def get_current_group_id() -> int:
+    with get_conn() as conn:
+        value = conn.execute(
+            "SELECT value FROM settings WHERE key = 'current_group_id'"
+        ).fetchone()
+    if value is None:
+        return 1
+    return int(value["value"])
+
+
+def get_group_name(group_id: int | None = None) -> str:
+    current_group_id = group_id if group_id is not None else get_current_group_id()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT name FROM groups WHERE id = ?",
+            (current_group_id,),
+        ).fetchone()
+    return row["name"] if row else "Mi grupo"
+
+
+def get_current_season_id() -> int:
+    current_group_id = get_current_group_id()
+    with get_conn() as conn:
+        value = conn.execute(
+            "SELECT value FROM settings WHERE key = 'current_season_id'"
+        ).fetchone()
+        season = None
+        if value is not None:
+            season = conn.execute(
+                "SELECT id FROM seasons WHERE id = ? AND group_id = ?",
+                (int(value["value"]), current_group_id),
+            ).fetchone()
+        if season is None:
+            season = conn.execute(
+                "SELECT id FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
+                (current_group_id,),
+            ).fetchone()
+            if season is not None:
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES ('current_season_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (str(season["id"]),),
+                )
+                conn.commit()
+        if season is None:
+            return 1
+        return int(season["id"])
+
+
+def get_season_name(season_id: int | None = None) -> str:
+    current_group_id = get_current_group_id()
+    season_value = season_id if season_id is not None else get_current_season_id()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT name FROM seasons WHERE id = ? AND group_id = ?",
+            (season_value, current_group_id),
+        ).fetchone()
+    return row["name"] if row else "Primer Temporada"
+
+
 @app.get("/config")
-def get_config() -> dict[str, str]:
+def get_config() -> dict[str, str | int]:
     with get_conn() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
     data = {row["key"]: row["value"] for row in rows}
+    current_group_id = get_current_group_id()
+    current_season_id = get_current_season_id()
     return {
         "brand": data.get("brand", "SuperBalon"),
-        "season_name": data.get("season_name", "Temporada 2026"),
+        "season_name": get_season_name(current_season_id),
         "tagline": data.get("tagline", "Liga casual de amigos"),
+        "group_name": get_group_name(current_group_id),
+        "current_group_id": current_group_id,
+        "current_season_id": current_season_id,
     }
 
 
 @app.post("/config")
-def update_config(payload: dict[str, str]) -> dict[str, str]:
+def update_config(payload: dict[str, str]) -> dict[str, str | int]:
     season_name = (payload.get("season_name") or "").strip()
     tagline = (payload.get("tagline") or "").strip()
     brand = (payload.get("brand") or "").strip()
+    current_group_id = payload.get("current_group_id")
+    current_season_id = payload.get("current_season_id")
 
     with get_conn() as conn:
         if season_name:
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('season_name', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                (season_name,),
-            )
+            selected_season_id = int(current_season_id) if current_season_id else get_current_season_id()
+            exists = conn.execute(
+                "SELECT 1 FROM seasons WHERE id = ? AND group_id = ?",
+                (selected_season_id, get_current_group_id()),
+            ).fetchone()
+            if exists:
+                conn.execute(
+                    "UPDATE seasons SET name = ? WHERE id = ?",
+                    (season_name, selected_season_id),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES ('season_name', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (season_name,),
+                )
         if tagline:
             conn.execute(
                 "INSERT INTO settings (key, value) VALUES ('tagline', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -155,6 +329,46 @@ def update_config(payload: dict[str, str]) -> dict[str, str]:
                 "INSERT INTO settings (key, value) VALUES ('brand', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (brand,),
             )
+        if current_group_id:
+            group_id = int(current_group_id)
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('current_group_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (str(group_id),),
+            )
+            if conn.execute(
+                "SELECT 1 FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
+                (group_id,),
+            ).fetchone():
+                first_season_id = conn.execute(
+                    "SELECT id FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
+                    (group_id,),
+                ).fetchone()["id"]
+                current_season = conn.execute(
+                    "SELECT value FROM settings WHERE key = 'current_season_id'"
+                ).fetchone()
+                if current_season is None or not conn.execute(
+                    "SELECT 1 FROM seasons WHERE id = ? AND group_id = ?",
+                    (int(current_season["value"]), group_id),
+                ).fetchone():
+                    conn.execute(
+                        "INSERT INTO settings (key, value) VALUES ('current_season_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        (str(first_season_id),),
+                    )
+        if current_season_id:
+            season_id = int(current_season_id)
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('current_season_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (str(season_id),),
+            )
+            season_row = conn.execute(
+                "SELECT group_id FROM seasons WHERE id = ?",
+                (season_id,),
+            ).fetchone()
+            if season_row:
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES ('current_group_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (str(season_row["group_id"]),),
+                )
         conn.commit()
 
     return get_config()
@@ -162,9 +376,11 @@ def update_config(payload: dict[str, str]) -> dict[str, str]:
 
 @app.get("/players")
 def get_players() -> list[dict[str, Any]]:
+    current_group_id = get_current_group_id()
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, name FROM players ORDER BY name ASC"
+            "SELECT id, name FROM players WHERE group_id = ? ORDER BY name ASC",
+            (current_group_id,),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -175,35 +391,47 @@ def create_player(payload: dict[str, str]) -> dict[str, Any]:
     if not name:
         raise HTTPException(status_code=400, detail="El nombre no puede estar vacío")
 
+    current_group_id = get_current_group_id()
     with get_conn() as conn:
         try:
             cursor = conn.execute(
-                "INSERT INTO players (name) VALUES (?)",
-                (name,),
+                "INSERT INTO players (name, group_id) VALUES (?, ?)",
+                (name, current_group_id),
             )
             conn.commit()
         except sqlite3.IntegrityError:
-            raise HTTPException(status_code=400, detail="Ese jugador ya existe") from None
+            raise HTTPException(status_code=400, detail="Ese jugador ya existe en este grupo") from None
 
-    return {"id": cursor.lastrowid, "name": name}
+    return {"id": cursor.lastrowid, "name": name, "group_id": current_group_id}
 
 
 @app.delete("/players")
 def delete_players() -> dict[str, str]:
+    current_group_id = get_current_group_id()
     with get_conn() as conn:
-        conn.execute("DELETE FROM players")
-        conn.execute("DELETE FROM team_players")
-        conn.execute("DELETE FROM matches")
-        conn.execute("DELETE FROM teams")
+        team_ids = conn.execute(
+            "SELECT id FROM teams WHERE group_id = ?",
+            (current_group_id,),
+        ).fetchall()
+        if team_ids:
+            team_ids_list = [row["id"] for row in team_ids]
+            placeholders = ", ".join("?" for _ in team_ids_list)
+            conn.execute(f"DELETE FROM team_players WHERE team_id IN ({placeholders})", team_ids_list)
+            conn.execute(f"DELETE FROM matches WHERE group_id = ?", (current_group_id,))
+            conn.execute(f"DELETE FROM teams WHERE group_id = ?", (current_group_id,))
+        conn.execute("DELETE FROM players WHERE group_id = ?", (current_group_id,))
         conn.commit()
     return {"status": "all_players_removed"}
 
 
 @app.get("/teams")
 def get_teams() -> list[dict[str, Any]]:
+    current_group_id = get_current_group_id()
+    current_season_id = get_current_season_id()
     with get_conn() as conn:
         team_rows = conn.execute(
-            "SELECT id, name FROM teams ORDER BY id"
+            "SELECT id, name FROM teams WHERE group_id = ? AND season_id = ? ORDER BY id",
+            (current_group_id, current_season_id),
         ).fetchall()
 
         result: list[dict[str, Any]] = []
@@ -230,17 +458,21 @@ def get_teams() -> list[dict[str, Any]]:
 def generate_teams(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     data = payload or {}
     team_size = int(data.get("team_size") or 2)
+    current_group_id = get_current_group_id()
+    current_season_id = get_current_season_id()
     if team_size < 1:
         raise HTTPException(status_code=400, detail="El tamaño del equipo debe ser mayor a 0")
 
     with get_conn() as conn:
-        players = conn.execute("SELECT id, name FROM players ORDER BY name ASC").fetchall()
+        players = conn.execute(
+            "SELECT id, name FROM players WHERE group_id = ? ORDER BY name ASC",
+            (current_group_id,),
+        ).fetchall()
         if len(players) < 2:
             raise HTTPException(status_code=400, detail="Necesitás al menos 2 jugadores para armar equipos")
 
-        conn.execute("DELETE FROM team_players")
-        conn.execute("DELETE FROM matches")
-        conn.execute("DELETE FROM teams")
+        conn.execute("DELETE FROM team_players WHERE team_id IN (SELECT id FROM teams WHERE group_id = ? AND season_id = ?)", (current_group_id, current_season_id))
+        conn.execute("DELETE FROM teams WHERE group_id = ? AND season_id = ?", (current_group_id, current_season_id))
 
         shuffled = [row for row in players]
         random.shuffle(shuffled)
@@ -254,7 +486,6 @@ def generate_teams(payload: dict[str, Any] | None = None) -> dict[str, Any]:
                 current_team = []
 
         if current_team:
-            # last partial team, keep as is
             teams.append(current_team)
 
         if not teams:
@@ -263,8 +494,8 @@ def generate_teams(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         for index, squad in enumerate(teams, start=1):
             team_name = f"Equipo {index}"
             cursor = conn.execute(
-                "INSERT INTO teams (name) VALUES (?)",
-                (team_name,),
+                "INSERT INTO teams (name, group_id, season_id) VALUES (?, ?, ?)",
+                (team_name, current_group_id, current_season_id),
             )
             team_id = cursor.lastrowid
             for player in squad:
@@ -280,6 +511,8 @@ def generate_teams(payload: dict[str, Any] | None = None) -> dict[str, Any]:
 
 @app.get("/matches")
 def get_matches() -> list[dict[str, Any]]:
+    current_group_id = get_current_group_id()
+    current_season_id = get_current_season_id()
     with get_conn() as conn:
         rows = conn.execute(
             """
@@ -288,14 +521,18 @@ def get_matches() -> list[dict[str, Any]]:
             FROM matches m
             INNER JOIN teams ht ON ht.id = m.home_team_id
             INNER JOIN teams at ON at.id = m.away_team_id
+            WHERE m.group_id = ? AND m.season_id = ?
             ORDER BY m.played_at DESC, m.id DESC
-            """
+            """,
+            (current_group_id, current_season_id),
         ).fetchall()
     return [dict(row) for row in rows]
 
 
 @app.post("/matches")
 def add_match(payload: dict[str, Any]) -> dict[str, Any]:
+    current_group_id = get_current_group_id()
+    current_season_id = get_current_season_id()
     home_team_id = int(payload.get("home_team_id") or 0)
     away_team_id = int(payload.get("away_team_id") or 0)
     home_goals = int(payload.get("home_goals") or 0)
@@ -308,18 +545,18 @@ def add_match(payload: dict[str, Any]) -> dict[str, Any]:
 
     with get_conn() as conn:
         exists = conn.execute(
-            "SELECT 1 FROM teams WHERE id IN (?, ?)",
-            (home_team_id, away_team_id),
+            "SELECT 1 FROM teams WHERE id IN (?, ?) AND group_id = ? AND season_id = ?",
+            (home_team_id, away_team_id, current_group_id, current_season_id),
         ).fetchall()
         if len(exists) != 2:
-            raise HTTPException(status_code=400, detail="Uno o ambos equipos no existen")
+            raise HTTPException(status_code=400, detail="Uno o ambos equipos no existen en la temporada actual")
 
         cursor = conn.execute(
             """
-            INSERT INTO matches (home_team_id, away_team_id, home_goals, away_goals)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO matches (group_id, season_id, home_team_id, away_team_id, home_goals, away_goals)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (home_team_id, away_team_id, home_goals, away_goals),
+            (current_group_id, current_season_id, home_team_id, away_team_id, home_goals, away_goals),
         )
         conn.commit()
 
@@ -328,14 +565,21 @@ def add_match(payload: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/standings")
 def get_standings() -> list[dict[str, Any]]:
+    current_group_id = get_current_group_id()
+    current_season_id = get_current_season_id()
     with get_conn() as conn:
-        player_rows = conn.execute("SELECT id, name FROM players ORDER BY name ASC").fetchall()
+        player_rows = conn.execute(
+            "SELECT id, name FROM players WHERE group_id = ? ORDER BY name ASC",
+            (current_group_id,),
+        ).fetchall()
         match_rows = conn.execute(
             """
             SELECT home_team_id, away_team_id, home_goals, away_goals
             FROM matches
+            WHERE group_id = ? AND season_id = ?
             ORDER BY id ASC
-            """
+            """,
+            (current_group_id, current_season_id),
         ).fetchall()
 
         standings: list[dict[str, Any]] = []
@@ -431,6 +675,122 @@ def get_summary() -> dict[str, Any]:
         "champion": champion,
         "standings": standings,
     }
+
+
+@app.get("/groups")
+def get_groups() -> list[dict[str, Any]]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT id, name, password FROM groups ORDER BY id ASC").fetchall()
+    result = []
+    for row in rows:
+        password_value = (row["password"] or "").strip()
+        result.append({
+            "id": row["id"],
+            "name": row["name"],
+            "password": password_value,
+            "has_password": bool(password_value),
+        })
+    return result
+
+
+@app.post("/groups/login")
+def login_group(payload: dict[str, Any]) -> dict[str, Any]:
+    group_id_raw = payload.get("group_id")
+    try:
+        group_id = int(group_id_raw) if group_id_raw is not None else 0
+    except (TypeError, ValueError):
+        group_id = 0
+    password = (payload.get("password") or "").strip()
+    if group_id <= 0:
+        raise HTTPException(status_code=400, detail="Grupo inválido")
+
+    with get_conn() as conn:
+        group = conn.execute(
+            "SELECT id, password FROM groups WHERE id = ?",
+            (group_id,),
+        ).fetchone()
+        if group is None:
+            raise HTTPException(status_code=404, detail="Grupo no encontrado")
+
+        stored_password = (group["password"] or "").strip()
+        if stored_password and stored_password != password:
+            raise HTTPException(status_code=403, detail="Contraseña incorrecta")
+
+        season = conn.execute(
+            "SELECT id FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
+            (group_id,),
+        ).fetchone()
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('current_group_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(group_id),),
+        )
+        if season:
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('current_season_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (str(season["id"]),),
+            )
+        conn.commit()
+
+    return {"ok": True, "group_id": group_id}
+
+
+@app.post("/groups")
+def create_group(payload: dict[str, str]) -> dict[str, Any]:
+    name = (payload.get("name") or "").strip() or "Mi grupo"
+    password = (payload.get("password") or "").strip()
+    with get_conn() as conn:
+        cursor = conn.execute(
+            "INSERT INTO groups (name, password) VALUES (?, ?)",
+            (name, password),
+        )
+        group_id = cursor.lastrowid
+        season_name = "Primer Temporada"
+        season_cursor = conn.execute(
+            "INSERT INTO seasons (group_id, name) VALUES (?, ?)",
+            (group_id, season_name),
+        )
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ("current_group_id", str(group_id)),
+        )
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ("current_season_id", str(season_cursor.lastrowid)),
+        )
+        conn.commit()
+    return {"id": group_id, "name": name, "password": password, "has_password": bool(password), "season_id": season_cursor.lastrowid}
+
+
+@app.get("/seasons")
+def get_seasons() -> list[dict[str, Any]]:
+    current_group_id = get_current_group_id()
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, group_id, name FROM seasons WHERE group_id = ? ORDER BY id ASC",
+            (current_group_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.post("/seasons")
+def create_season(payload: dict[str, str]) -> dict[str, Any]:
+    group_id = int(payload.get("group_id") or get_current_group_id())
+    name = (payload.get("name") or "").strip() or "Primer Temporada"
+    with get_conn() as conn:
+        cursor = conn.execute(
+            "INSERT INTO seasons (group_id, name) VALUES (?, ?)",
+            (group_id, name),
+        )
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ("current_group_id", str(group_id)),
+        )
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ("current_season_id", str(cursor.lastrowid)),
+        )
+        conn.commit()
+    return {"id": cursor.lastrowid, "group_id": group_id, "name": name}
 
 
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")

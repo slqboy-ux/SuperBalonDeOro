@@ -39,6 +39,62 @@ select {
   font: inherit;
 }
 
+.hidden {
+  display: none !important;
+}
+
+.gate-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: radial-gradient(circle at top, rgba(142, 240, 177, 0.15), transparent 30%), linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+}
+
+.gate-card {
+  width: min(720px, 100%);
+  background: linear-gradient(180deg, rgba(13, 28, 22, 0.96), rgba(11, 22, 18, 0.94));
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  padding: 24px;
+  box-shadow: 0 16px 36px var(--shadow);
+}
+
+.group-gate-list {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0 22px;
+}
+
+.group-gate-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: rgba(18, 44, 33, 0.88);
+  color: var(--text);
+  padding: 14px 16px;
+  border-radius: 14px;
+}
+
+.group-gate-item small {
+  color: var(--muted);
+}
+
+.group-create-box {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+
+.gate-card h2 {
+  margin-bottom: 0;
+}
+
 .app-shell {
   max-width: 1200px;
   margin: 0 auto;
@@ -51,6 +107,13 @@ select {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 24px;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .brand-wrap {
@@ -149,9 +212,35 @@ h2 {
 
 .hero-actions {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 10px;
   min-width: min(100%, 420px);
+}
+
+.context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.context-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.context-field label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.context-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .grid {
@@ -283,6 +372,11 @@ textarea:focus {
   color: var(--text);
 }
 
+.small-btn {
+  padding: 9px 12px;
+  font-size: 0.85rem;
+}
+
 input,
 select {
   background: var(--input);
@@ -328,6 +422,15 @@ button:active {
 .secondary-btn {
   width: 100%;
   margin-bottom: 12px;
+}
+
+.share-btn {
+  margin-top: -4px;
+}
+
+.share-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .danger-btn {
