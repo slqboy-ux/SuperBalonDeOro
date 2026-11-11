@@ -31,10 +31,16 @@ def _is_production_environment() -> bool:
     )
 
 
-if _is_production_environment() and (not DATABASE_URL or psycopg is None):
-    raise RuntimeError(
-        "DATABASE_URL no está configurada o psycopg no está disponible en producción. "
-        "Sin una base persistente, los grupos y temporadas se pierden al reiniciar el contenedor."
+if _is_production_environment() and not DATABASE_URL:
+    print(
+        "WARNING: DATABASE_URL no está configurada en producción. "
+        "La app va a usar SQLite local hasta que la base persistente esté conectada."
+    )
+
+if _is_production_environment() and DATABASE_URL and psycopg is None:
+    print(
+        "WARNING: psycopg no está disponible. "
+        "La app va a usar SQLite local aunque el entorno sea de producción."
     )
 
 USE_POSTGRES = bool(DATABASE_URL and psycopg is not None)
