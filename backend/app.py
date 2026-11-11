@@ -276,16 +276,27 @@ def get_config() -> dict[str, str | int]:
 
 
 @app.post("/config")
-def update_config(payload: dict[str, str]) -> dict[str, str | int]:
+def update_config(payload: dict[str, Any]) -> dict[str, str | int]:
     season_name = (payload.get("season_name") or "").strip()
     tagline = (payload.get("tagline") or "").strip()
     brand = (payload.get("brand") or "").strip()
     current_group_id = payload.get("current_group_id")
     current_season_id = payload.get("current_season_id")
 
+    def parse_positive_int(value: Any, field_name: str) -> int:
+        if value is None or value == "":
+            raise HTTPException(status_code=400, detail=f"{field_name} requerido")
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"{field_name} inválido") from exc
+        if parsed <= 0:
+            raise HTTPException(status_code=400, detail=f"{field_name} inválido")
+        return parsed
+
     with get_conn() as conn:
         if season_name:
-            selected_season_id = int(current_season_id) if current_season_id else get_current_season_id()
+            selected_season_id = parse_positive_int(current_season_id, "current_season_id") if current_season_id else get_current_season_id()
             exists = conn.execute(
                 "SELECT 1 FROM seasons WHERE id = ? AND group_id = ?",
                 (selected_season_id, get_current_group_id()),
@@ -310,14 +321,14 @@ def update_config(payload: dict[str, str]) -> dict[str, str | int]:
                 "INSERT INTO settings (key, value) VALUES ('brand', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (brand,),
             )
-        if current_group_id:
-            group_id = int(current_group_id)
+        if current_group_id is not None and current_group_id != "":
+            group_id = parse_positive_int(current_group_id, "current_group_id")
             conn.execute(
                 "INSERT INTO settings (key, value) VALUES ('current_group_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (str(group_id),),
             )
-        if current_season_id:
-            season_id = int(current_season_id)
+        if current_season_id is not None and current_season_id != "":
+            season_id = parse_positive_int(current_season_id, "current_season_id")
             conn.execute(
                 "INSERT INTO settings (key, value) VALUES ('current_season_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (str(season_id),),

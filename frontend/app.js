@@ -40,7 +40,22 @@ async function fetchJson(url, options = {}) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || "Hubo un error");
+    let message = "Hubo un error";
+
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed?.detail) {
+        if (Array.isArray(parsed.detail)) {
+          message = parsed.detail.map((entry) => entry?.msg || "Datos inválidos").join(". ");
+        } else if (typeof parsed.detail === "string") {
+          message = parsed.detail;
+        }
+      }
+    } catch {
+      message = text || message;
+    }
+
+    throw new Error(message);
   }
 
   return response.json();
@@ -564,7 +579,7 @@ async function changeCurrentGroup() {
   try {
     await fetchJson(`${apiUrl}/config`, {
       method: "POST",
-      body: JSON.stringify({ current_group_id: groupId }),
+      body: JSON.stringify({ current_group_id: String(groupId) }),
     });
     loadData();
   } catch (error) {
@@ -579,7 +594,7 @@ async function changeCurrentSeason() {
   try {
     await fetchJson(`${apiUrl}/config`, {
       method: "POST",
-      body: JSON.stringify({ current_season_id: seasonId }),
+      body: JSON.stringify({ current_season_id: String(seasonId) }),
     });
     loadData();
   } catch (error) {
@@ -644,7 +659,10 @@ enterAppBtn.addEventListener("click", async () => {
   try {
     await fetchJson(`${apiUrl}/config`, {
       method: "POST",
-      body: JSON.stringify({ current_group_id: groupId, current_season_id: seasonId }),
+      body: JSON.stringify({
+        current_group_id: String(groupId),
+        current_season_id: String(seasonId),
+      }),
     });
     showAppShell(true);
     await loadData();

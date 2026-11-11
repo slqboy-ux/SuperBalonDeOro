@@ -32,6 +32,23 @@ class DeletePlayerEndpointTest(unittest.TestCase):
         self.assertEqual(config_response.json()["current_group_id"], 0)
         self.assertEqual(config_response.json()["current_season_id"], 0)
 
+    def test_config_accepts_numeric_group_and_season_selection(self):
+        group_response = self.client.post("/groups", json={"name": "Grupo test", "password": ""})
+        self.assertEqual(group_response.status_code, 200)
+        group_id = group_response.json()["id"]
+
+        season_response = self.client.post("/seasons", json={"name": "Temporada 2026"})
+        self.assertEqual(season_response.status_code, 200)
+        season_id = season_response.json()["id"]
+
+        config_response = self.client.post(
+            "/config",
+            json={"current_group_id": group_id, "current_season_id": season_id},
+        )
+        self.assertEqual(config_response.status_code, 200)
+        self.assertEqual(config_response.json()["current_group_id"], group_id)
+        self.assertEqual(config_response.json()["current_season_id"], season_id)
+
     def test_delete_single_player_removes_player_from_group(self):
         group_response = self.client.post("/groups", json={"name": "Grupo test", "password": ""})
         self.assertEqual(group_response.status_code, 200)
