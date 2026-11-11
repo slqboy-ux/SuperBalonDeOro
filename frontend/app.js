@@ -207,8 +207,11 @@ async function renderGateSeasons(groupId) {
       return;
     }
 
+    const selectedGroup = (await fetchJson(`${apiUrl}/groups`)).find((group) => group.id === groupId);
+    const groupName = selectedGroup ? selectedGroup.name : "Grupo";
+
     gateSeasonSelect.innerHTML = seasons
-      .map((season) => `<option value="${season.id}">${season.name}</option>`)
+      .map((season) => `<option value="${season.id}">${groupName} - ${season.name}</option>`)
       .join("");
     gateSeasonSelect.disabled = false;
     enterAppBtn.disabled = false;
@@ -225,7 +228,9 @@ async function renderGateSeasons(groupId) {
 }
 
 function renderGroupGate(groups) {
-  if (!groups.length) {
+  const visibleGroups = groups.filter((group) => group.name && group.name.toLowerCase() !== "mi grupo");
+
+  if (!visibleGroups.length) {
     groupGateList.innerHTML = '<div class="group-gate-empty">Todavía no hay grupos.</div>';
     gateSeasonSelect.innerHTML = '<option value="">Seleccioná un grupo primero</option>';
     gateSeasonSelect.disabled = true;
@@ -233,7 +238,7 @@ function renderGroupGate(groups) {
     return;
   }
 
-  groupGateList.innerHTML = groups
+  groupGateList.innerHTML = visibleGroups
     .map(
       (group) => `
         <button class="group-gate-item" type="button" data-group-id="${group.id}">
@@ -243,6 +248,19 @@ function renderGroupGate(groups) {
       `
     )
     .join("");
+
+  groupGateList.querySelectorAll(".group-gate-item").forEach((button) => {
+    const groupId = Number(button.dataset.groupId);
+    const group = groups.find((item) => item.id === groupId);
+    if (!group) return;
+
+    button.addEventListener("click", async () => {
+      const seasonOptions = [...gateSeasonSelect.options].map((option) => option.textContent).join(" | ");
+      if (seasonOptions) {
+        button.title = `${group.name} - ${seasonOptions}`;
+      }
+    });
+  });
 
   groupGateList.querySelectorAll(".group-gate-item").forEach((button) => {
     button.addEventListener("click", async () => {

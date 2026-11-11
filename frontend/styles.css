@@ -104,6 +104,23 @@ select {
   padding-top: 18px;
 }
 
+.admin-contact-box {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(142, 240, 177, 0.04);
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.admin-contact-box a {
+  color: var(--primary-strong);
+  text-decoration: none;
+  font-weight: 700;
+}
+
 .gate-card h2 {
   margin-bottom: 0;
 }
