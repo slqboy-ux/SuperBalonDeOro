@@ -140,8 +140,6 @@ def init_db() -> None:
             "season_name": "Temporada 2026",
             "tagline": "Pega la lista de amigos, arma equipos y seguí la tabla en segundos.",
             "brand": "SUPERBALON DE ORO",
-            "current_group_id": "1",
-            "current_season_id": "1",
         }
         for key, value in defaults.items():
             conn.execute(
@@ -157,19 +155,6 @@ def init_db() -> None:
                 "INSERT INTO seasons (group_id, name) VALUES (?, ?)",
                 (default_group_id, "Primer Temporada"),
             )
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                ("current_group_id", str(default_group_id)),
-            )
-            season_row = conn.execute(
-                "SELECT id FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
-                (default_group_id,),
-            ).fetchone()
-            if season_row:
-                conn.execute(
-                    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                    ("current_season_id", str(season_row["id"])),
-                )
 
         if group_count == 0 or conn.execute("SELECT COUNT(*) FROM seasons").fetchone()[0] == 0:
             existing_group = conn.execute("SELECT id FROM groups ORDER BY id ASC LIMIT 1").fetchone()
@@ -178,15 +163,6 @@ def init_db() -> None:
                     "INSERT INTO seasons (group_id, name) VALUES (?, ?)",
                     (existing_group["id"], "Primer Temporada"),
                 )
-                current_season = conn.execute(
-                    "SELECT id FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
-                    (existing_group["id"],),
-                ).fetchone()
-                if current_season:
-                    conn.execute(
-                        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                        ("current_season_id", str(current_season["id"])),
-                    )
 
         ensure_column("groups", "password", "TEXT DEFAULT ''")
         ensure_column("players", "group_id", "INTEGER NOT NULL DEFAULT 1")
@@ -223,9 +199,13 @@ def get_current_group_id() -> int:
         value = conn.execute(
             "SELECT value FROM settings WHERE key = 'current_group_id'"
         ).fetchone()
-    if value is None:
-        return 1
-    return int(value["value"])
+    if value is None or (value["value"] is None):
+        return 0
+    try:
+        parsed = int(str(value["value"]).strip())
+    except (TypeError, ValueError):
+        return 0
+    return parsed if parsed > 0 else 0
 
 
 def get_group_name(group_id: int | None = None) -> str:
@@ -244,26 +224,27 @@ def get_current_season_id() -> int:
         value = conn.execute(
             "SELECT value FROM settings WHERE key = 'current_season_id'"
         ).fetchone()
-        season = None
-        if value is not None:
-            season = conn.execute(
-                "SELECT id FROM seasons WHERE id = ? AND group_id = ?",
-                (int(value["value"]), current_group_id),
-            ).fetchone()
-        if season is None:
-            season = conn.execute(
-                "SELECT id FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
-                (current_group_id,),
-            ).fetchone()
-            if season is not None:
-                conn.execute(
-                    "INSERT INTO settings (key, value) VALUES ('current_season_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                    (str(season["id"]),),
-                )
-                conn.commit()
-        if season is None:
-            return 1
-        return int(season["id"])
+        if value is None or (value["value"] is None):
+            return 0
+        try:
+            season_id = int(str(value["value"]).strip())
+        except (TypeError, ValueError):
+            return 0
+        season = conn.execute(
+            "SELECT id FROM seasons WHERE id = ? AND group_id = ?",
+            (season_id, current_group_id),
+        ).fetchone()
+        if season is not None:
+            return int(season["id"])
+        if current_group_id <= 0:
+            return 0
+        fallback = conn.execute(
+            "SELECT id FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
+            (current_group_id,),
+        ).fetchone()
+        if fallback is None:
+            return 0
+        return int(fallback["id"])
 
 
 def get_season_name(season_id: int | None = None) -> str:
@@ -335,25 +316,6 @@ def update_config(payload: dict[str, str]) -> dict[str, str | int]:
                 "INSERT INTO settings (key, value) VALUES ('current_group_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (str(group_id),),
             )
-            if conn.execute(
-                "SELECT 1 FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
-                (group_id,),
-            ).fetchone():
-                first_season_id = conn.execute(
-                    "SELECT id FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
-                    (group_id,),
-                ).fetchone()["id"]
-                current_season = conn.execute(
-                    "SELECT value FROM settings WHERE key = 'current_season_id'"
-                ).fetchone()
-                if current_season is None or not conn.execute(
-                    "SELECT 1 FROM seasons WHERE id = ? AND group_id = ?",
-                    (int(current_season["value"]), group_id),
-                ).fetchone():
-                    conn.execute(
-                        "INSERT INTO settings (key, value) VALUES ('current_season_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                        (str(first_season_id),),
-                    )
         if current_season_id:
             season_id = int(current_season_id)
             conn.execute(
@@ -741,11 +703,6 @@ def login_group(payload: dict[str, Any]) -> dict[str, Any]:
             "INSERT INTO settings (key, value) VALUES ('current_group_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (str(group_id),),
         )
-        if season:
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('current_season_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                (str(season["id"]),),
-            )
         conn.commit()
 
     return {"ok": True, "group_id": group_id}
@@ -769,10 +726,6 @@ def create_group(payload: dict[str, str]) -> dict[str, Any]:
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             ("current_group_id", str(group_id)),
-        )
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            ("current_season_id", str(season_cursor.lastrowid)),
         )
         conn.commit()
     return {"id": group_id, "name": name, "password": password, "has_password": bool(password), "season_id": season_cursor.lastrowid}

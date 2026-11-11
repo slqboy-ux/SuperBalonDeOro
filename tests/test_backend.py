@@ -26,6 +26,12 @@ class DeletePlayerEndpointTest(unittest.TestCase):
         if "SUPERBALON_DB_PATH" in os.environ:
             del os.environ["SUPERBALON_DB_PATH"]
 
+    def test_default_config_requires_explicit_group_and_season_selection(self):
+        config_response = self.client.get("/config")
+        self.assertEqual(config_response.status_code, 200)
+        self.assertEqual(config_response.json()["current_group_id"], 0)
+        self.assertEqual(config_response.json()["current_season_id"], 0)
+
     def test_delete_single_player_removes_player_from_group(self):
         group_response = self.client.post("/groups", json={"name": "Grupo test", "password": ""})
         self.assertEqual(group_response.status_code, 200)
