@@ -31,6 +31,7 @@ const championNameEl = document.getElementById("championName");
 const shareTeamsBtn = document.getElementById("shareTeamsBtn");
 const gateSeasonSelect = document.getElementById("gateSeasonSelect");
 const enterAppBtn = document.getElementById("enterAppBtn");
+const changeGroupBtn = document.getElementById("changeGroupBtn");
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
@@ -61,11 +62,21 @@ async function fetchJson(url, options = {}) {
   return response.json();
 }
 
+function syncDefaultTeamSize(playerCount) {
+  const defaultSize = playerCount > 0 ? Math.max(1, Math.floor(playerCount / 2)) : 2;
+  if (!teamSizeInput.value || Number(teamSizeInput.value) === 2) {
+    teamSizeInput.value = String(defaultSize);
+  }
+}
+
 function renderPlayers(players) {
   if (!players.length) {
     playerList.innerHTML = "<li>No hay jugadores todavía.</li>";
+    syncDefaultTeamSize(0);
     return;
   }
+
+  syncDefaultTeamSize(players.length);
 
   playerList.innerHTML = players
     .map(
@@ -440,12 +451,14 @@ async function generateTeams() {
 
 function buildTeamsShareText(teams) {
   const season = seasonNameEl.textContent || "Temporada";
+  const appLink = window.location.origin;
   const lines = [
     `${season}`,
     "",
     "Equipos armados:",
     ...teams.map((team, index) => `${index + 1}. ${team.name}: ${team.players.map((player) => player.name).join(", ") || "Sin jugadores"}`),
     "",
+    `Ingresá acá: ${appLink}`,
     "Compartido desde SUPERBALON DE ORO",
   ];
   return lines.join("\n");
@@ -547,6 +560,9 @@ async function createGroupFromGate() {
     selectedGateGroupId = response.id;
     newGroupNameInput.value = "";
     newGroupPasswordInput.value = "";
+
+    const groups = await fetchJson(`${apiUrl}/groups`);
+    renderGroupGate(groups);
     await renderGateSeasons(response.id);
   } catch (error) {
     alert(error.message);
@@ -602,6 +618,31 @@ async function changeCurrentSeason() {
   }
 }
 
+async function returnToGroupSelection() {
+  try {
+    await fetchJson(`${apiUrl}/config`, {
+      method: "POST",
+      body: JSON.stringify({ current_group_id: "0", current_season_id: "0" }),
+    });
+  } catch (error) {
+    console.error(error);
+  }
+
+  selectedGateGroupId = null;
+  gateSeasonSelect.innerHTML = '<option value="">Seleccioná un grupo primero</option>';
+  gateSeasonSelect.disabled = true;
+  enterAppBtn.disabled = true;
+
+  try {
+    const groups = await fetchJson(`${apiUrl}/groups`);
+    renderGroupGate(groups);
+  } catch (error) {
+    console.error(error);
+  }
+
+  showAppShell(false);
+}
+
 async function clearPlayersList() {
   if (!(await ensureActiveContext())) return;
 
@@ -640,6 +681,7 @@ document.getElementById("copyPlayersBtn").addEventListener("click", copyPlayerLi
 document.getElementById("generateTeamsBtn").addEventListener("click", generateTeams);
 document.getElementById("shareTeamsBtn").addEventListener("click", shareTeamsOnWhatsapp);
 document.getElementById("saveMatchBtn").addEventListener("click", saveMatch);
+changeGroupBtn.addEventListener("click", returnToGroupSelection);
 document.getElementById("clearPlayersBtn").addEventListener("click", clearPlayersList);
 document.getElementById("resetBtn").addEventListener("click", resetData);
 groupSelect.addEventListener("change", changeCurrentGroup);
