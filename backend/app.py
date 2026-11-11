@@ -7,12 +7,21 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ImportError:  # pragma: no cover
+    psycopg = None
+    dict_row = None
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = BASE_DIR / "data.db"
 DB_PATH = Path(os.environ.get("SUPERBALON_DB_PATH", str(DEFAULT_DB_PATH)))
+DATABASE_URL = os.environ.get("DATABASE_URL")
+USE_POSTGRES = bool(DATABASE_URL and psycopg is not None)
 
 frontend_candidates = [
     BASE_DIR / "frontend",
@@ -34,14 +43,61 @@ app.add_middleware(
 )
 
 
-def get_conn() -> sqlite3.Connection:
+def normalize_query(query: str, params: Any) -> tuple[str, Any]:
+    if not USE_POSTGRES:
+        return query, params
+    if params is None:
+        return query, params
+    return query.replace("?", "%s"), params
+
+
+def get_conn():
+    if USE_POSTGRES:
+        conn = psycopg.connect(DATABASE_URL, autocommit=False)
+        conn.row_factory = dict_row
+
+        original_execute = conn.execute
+
+        def execute(query: str, params: Any = None, *args: Any, **kwargs: Any):
+            normalized_query, normalized_params = normalize_query(query, params)
+            return original_execute(normalized_query, normalized_params, *args, **kwargs)
+
+        conn.execute = execute
+        return conn
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
+def last_insert_id(cursor: Any) -> Any:
+    try:
+        row = cursor.fetchone()
+    except Exception:
+        row = None
+
+    if row is not None:
+        if isinstance(row, dict):
+            return row.get("id")
+        return row[0]
+
+    if hasattr(cursor, "lastrowid") and cursor.lastrowid is not None:
+        return cursor.lastrowid
+    return None
+
+
 def ensure_column(table_name: str, column_name: str, column_sql: str) -> None:
     with get_conn() as conn:
+        if USE_POSTGRES:
+            existing = conn.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = %s AND column_name = %s",
+                (table_name, column_name),
+            ).fetchone()
+            if existing is None:
+                conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {column_sql}')
+            conn.commit()
+            return
+
         columns = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
         if not any(column[1] == column_name for column in columns):
             conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
@@ -149,8 +205,8 @@ def init_db() -> None:
 
         group_count = conn.execute("SELECT COUNT(*) AS total FROM groups").fetchone()["total"]
         if group_count == 0:
-            group_cursor = conn.execute("INSERT INTO groups (name) VALUES (?)", ("Mi grupo",))
-            default_group_id = group_cursor.lastrowid
+            group_cursor = conn.execute("INSERT INTO groups (name) VALUES (?) RETURNING id", ("Mi grupo",))
+            default_group_id = last_insert_id(group_cursor)
             conn.execute(
                 "INSERT INTO seasons (group_id, name) VALUES (?, ?)",
                 (default_group_id, "Primer Temporada"),
@@ -374,8 +430,12 @@ def create_player(payload: dict[str, str]) -> dict[str, Any]:
             conn.commit()
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=400, detail="Ese jugador ya existe en este grupo") from None
+        except Exception as exc:  # pragma: no cover - PostgreSQL path
+            if psycopg is not None and isinstance(exc, psycopg.IntegrityError):
+                raise HTTPException(status_code=400, detail="Ese jugador ya existe en este grupo") from None
+            raise
 
-    return {"id": cursor.lastrowid, "name": name, "group_id": current_group_id}
+    return {"id": last_insert_id(cursor), "name": name, "group_id": current_group_id}
 
 
 @app.delete("/players/{player_id}")
@@ -487,7 +547,7 @@ def generate_teams(payload: dict[str, Any] | None = None) -> dict[str, Any]:
                 "INSERT INTO teams (name, group_id, season_id) VALUES (?, ?, ?)",
                 (team_name, current_group_id, current_season_id),
             )
-            team_id = cursor.lastrowid
+            team_id = last_insert_id(cursor)
             for player in squad:
                 conn.execute(
                     "INSERT INTO team_players (team_id, player_id) VALUES (?, ?)",
@@ -550,7 +610,7 @@ def add_match(payload: dict[str, Any]) -> dict[str, Any]:
         )
         conn.commit()
 
-    return {"id": cursor.lastrowid, "status": "match_saved"}
+    return {"id": last_insert_id(cursor), "status": "match_saved"}
 
 
 @app.get("/standings")
@@ -728,7 +788,7 @@ def create_group(payload: dict[str, str]) -> dict[str, Any]:
             "INSERT INTO groups (name, password) VALUES (?, ?)",
             (name, password),
         )
-        group_id = cursor.lastrowid
+        group_id = last_insert_id(cursor)
         season_name = "Primer Temporada"
         season_cursor = conn.execute(
             "INSERT INTO seasons (group_id, name) VALUES (?, ?)",
@@ -739,7 +799,7 @@ def create_group(payload: dict[str, str]) -> dict[str, Any]:
             ("current_group_id", str(group_id)),
         )
         conn.commit()
-    return {"id": group_id, "name": name, "password": password, "has_password": bool(password), "season_id": season_cursor.lastrowid}
+    return {"id": group_id, "name": name, "password": password, "has_password": bool(password), "season_id": last_insert_id(season_cursor)}
 
 
 @app.get("/seasons")
@@ -768,10 +828,10 @@ def create_season(payload: dict[str, str]) -> dict[str, Any]:
         )
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            ("current_season_id", str(cursor.lastrowid)),
+            ("current_season_id", str(last_insert_id(cursor))),
         )
         conn.commit()
-    return {"id": cursor.lastrowid, "group_id": group_id, "name": name}
+    return {"id": last_insert_id(cursor), "group_id": group_id, "name": name}
 
 
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")
