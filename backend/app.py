@@ -21,6 +21,22 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = BASE_DIR / "data.db"
 DB_PATH = Path(os.environ.get("SUPERBALON_DB_PATH", str(DEFAULT_DB_PATH)))
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+
+def _is_production_environment() -> bool:
+    return bool(
+        os.environ.get("RAILWAY_ENVIRONMENT")
+        or os.environ.get("RENDER")
+        or os.environ.get("APP_ENV") == "production"
+    )
+
+
+if _is_production_environment() and (not DATABASE_URL or psycopg is None):
+    raise RuntimeError(
+        "DATABASE_URL no está configurada o psycopg no está disponible en producción. "
+        "Sin una base persistente, los grupos y temporadas se pierden al reiniciar el contenedor."
+    )
+
 USE_POSTGRES = bool(DATABASE_URL and psycopg is not None)
 
 frontend_candidates = [

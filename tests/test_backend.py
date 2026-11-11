@@ -64,6 +64,19 @@ class DeletePlayerEndpointTest(unittest.TestCase):
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(list_response.json(), [])
 
+    def test_railway_environment_requires_database_url(self):
+        os.environ["RAILWAY_ENVIRONMENT"] = "production"
+        os.environ.pop("DATABASE_URL", None)
+
+        try:
+            module_path = Path(__file__).resolve().parents[1] / "backend" / "app.py"
+            spec = importlib.util.spec_from_file_location("superbalon_backend_prod", module_path)
+            backend = importlib.util.module_from_spec(spec)
+            with self.assertRaises(RuntimeError):
+                spec.loader.exec_module(backend)
+        finally:
+            os.environ.pop("RAILWAY_ENVIRONMENT", None)
+
 
 if __name__ == "__main__":
     unittest.main()
