@@ -1,4 +1,5 @@
 const apiUrl = window.location.origin;
+let selectedGateGroupId = null;
 
 const brandTitle = document.getElementById("brandTitle");
 const seasonNameEl = document.getElementById("seasonName");
@@ -28,6 +29,8 @@ const totalTeamsEl = document.getElementById("totalTeams");
 const totalMatchesEl = document.getElementById("totalMatches");
 const championNameEl = document.getElementById("championName");
 const shareTeamsBtn = document.getElementById("shareTeamsBtn");
+const gateSeasonSelect = document.getElementById("gateSeasonSelect");
+const enterAppBtn = document.getElementById("enterAppBtn");
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
@@ -50,8 +53,31 @@ function renderPlayers(players) {
   }
 
   playerList.innerHTML = players
-    .map((player) => `<li>${player.name}</li>`)
+    .map(
+      (player) => `
+        <li>
+          <span>${player.name}</span>
+          <button class="delete-player-btn" type="button" data-player-id="${player.id}" aria-label="Eliminar ${player.name}">Eliminar</button>
+        </li>
+      `
+    )
     .join("");
+
+  playerList.querySelectorAll(".delete-player-btn").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const playerId = Number(button.dataset.playerId);
+      if (!playerId) return;
+
+      try {
+        await fetchJson(`${apiUrl}/players/${playerId}`, {
+          method: "DELETE",
+        });
+        loadData();
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+  });
 }
 
 function renderTeams(teams) {
@@ -134,9 +160,50 @@ function showAppShell(show) {
   groupGate.classList.toggle("hidden", show);
 }
 
+async function renderGateSeasons(groupId) {
+  selectedGateGroupId = groupId;
+
+  try {
+    const currentConfig = await fetchJson(`${apiUrl}/config`);
+    const configGroupId = Number(currentConfig.current_group_id || groupId);
+    if (!configGroupId) {
+      gateSeasonSelect.innerHTML = '<option value="">Seleccioná un grupo primero</option>';
+      gateSeasonSelect.disabled = true;
+      enterAppBtn.disabled = true;
+      return;
+    }
+
+    const seasons = await fetchJson(`${apiUrl}/seasons`);
+    if (!seasons.length) {
+      gateSeasonSelect.innerHTML = '<option value="">Sin temporadas</option>';
+      gateSeasonSelect.disabled = true;
+      enterAppBtn.disabled = true;
+      return;
+    }
+
+    gateSeasonSelect.innerHTML = seasons
+      .map((season) => `<option value="${season.id}">${season.name}</option>`)
+      .join("");
+    gateSeasonSelect.disabled = false;
+    enterAppBtn.disabled = false;
+
+    if (currentConfig.current_season_id) {
+      gateSeasonSelect.value = String(currentConfig.current_season_id);
+    }
+  } catch (error) {
+    console.error(error);
+    gateSeasonSelect.innerHTML = '<option value="">Error al cargar temporadas</option>';
+    gateSeasonSelect.disabled = true;
+    enterAppBtn.disabled = true;
+  }
+}
+
 function renderGroupGate(groups) {
   if (!groups.length) {
     groupGateList.innerHTML = '<div class="group-gate-empty">Todavía no hay grupos.</div>';
+    gateSeasonSelect.innerHTML = '<option value="">Seleccioná un grupo primero</option>';
+    gateSeasonSelect.disabled = true;
+    enterAppBtn.disabled = true;
     return;
   }
 
@@ -157,33 +224,27 @@ function renderGroupGate(groups) {
       const group = groups.find((item) => item.id === groupId);
       if (!group) return;
 
-      if (group.has_password) {
-        const password = window.prompt(`Ingresá la contraseña de "${group.name}"`);
-        if (password === null) return;
+      try {
+        if (group.has_password) {
+          const password = window.prompt(`Ingresá la contraseña de "${group.name}"`);
+          if (password === null) return;
 
-        try {
           await fetchJson(`${apiUrl}/groups/login`, {
             method: "POST",
             body: JSON.stringify({ group_id: groupId, password }),
           });
-        } catch (error) {
-          alert(error.message);
-          return;
-        }
-      } else {
-        try {
+        } else {
           await fetchJson(`${apiUrl}/config`, {
             method: "POST",
             body: JSON.stringify({ current_group_id: groupId }),
           });
-        } catch (error) {
-          alert(error.message);
-          return;
         }
-      }
 
-      showAppShell(true);
-      loadData();
+        selectedGateGroupId = groupId;
+        await renderGateSeasons(groupId);
+      } catch (error) {
+        alert(error.message);
+      }
     });
   });
 }
@@ -212,10 +273,31 @@ function renderSeasons(seasons, selectedSeasonId) {
   seasonSelect.value = String(selectedSeasonId ?? seasons[0].id);
 }
 
+async function ensureActiveContext() {
+  try {
+    const config = await fetchJson(`${apiUrl}/config`);
+    const hasSelection = Boolean(config.current_group_id && config.current_season_id);
+    if (!hasSelection) {
+      alert("Elegí un grupo y una temporada antes de cargar jugadores o equipos.");
+      showAppShell(false);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
+}
+
 async function loadData() {
   try {
-    const [config, groups, seasons, players, teams, matches, standings, summary] = await Promise.all([
-      fetchJson(`${apiUrl}/config`),
+    const config = await fetchJson(`${apiUrl}/config`);
+    if (!config.current_group_id || !config.current_season_id) {
+      showAppShell(false);
+      return;
+    }
+
+    const [groups, seasons, players, teams, matches, standings, summary] = await Promise.all([
       fetchJson(`${apiUrl}/groups`),
       fetchJson(`${apiUrl}/seasons`),
       fetchJson(`${apiUrl}/players`),
@@ -250,6 +332,8 @@ async function loadData() {
 }
 
 async function addPlayer() {
+  if (!(await ensureActiveContext())) return;
+
   const name = playerNameInput.value.trim();
   if (!name) return;
 
@@ -281,6 +365,8 @@ function parseBulkPlayers(rawText) {
 }
 
 async function bulkAddPlayers() {
+  if (!(await ensureActiveContext())) return;
+
   const rawText = (bulkPlayersInput.value || "").trim();
   if (!rawText) return;
 
@@ -288,6 +374,10 @@ async function bulkAddPlayers() {
   if (!names.length) return;
 
   try {
+    await fetchJson(`${apiUrl}/players`, {
+      method: "DELETE",
+    });
+
     await Promise.all(
       names.map((name) =>
         fetchJson(`${apiUrl}/players`, {
@@ -305,6 +395,8 @@ async function bulkAddPlayers() {
 }
 
 async function copyPlayerList() {
+  if (!(await ensureActiveContext())) return;
+
   try {
     const players = await fetchJson(`${apiUrl}/players`);
     const text = players.map((player) => player.name).join("\n");
@@ -316,6 +408,8 @@ async function copyPlayerList() {
 }
 
 async function generateTeams() {
+  if (!(await ensureActiveContext())) return;
+
   const teamSize = Number(teamSizeInput.value || 2);
 
   try {
@@ -358,6 +452,8 @@ async function shareTeamsOnWhatsapp() {
 }
 
 async function saveMatch() {
+  if (!(await ensureActiveContext())) return;
+
   const homeTeamId = Number(homeTeamSelect.value);
   const awayTeamId = Number(awayTeamSelect.value);
   const homeGoals = Number(document.getElementById("homeGoals").value || 0);
@@ -433,10 +529,10 @@ async function createGroupFromGate() {
         body: JSON.stringify({ group_id: response.id, password }),
       });
     }
+    selectedGateGroupId = response.id;
     newGroupNameInput.value = "";
     newGroupPasswordInput.value = "";
-    showAppShell(true);
-    loadData();
+    await renderGateSeasons(response.id);
   } catch (error) {
     alert(error.message);
   }
@@ -492,6 +588,8 @@ async function changeCurrentSeason() {
 }
 
 async function clearPlayersList() {
+  if (!(await ensureActiveContext())) return;
+
   const confirmed = window.confirm("Se van a borrar todos los jugadores, equipos y partidos de la temporada actual. ¿Continuás?");
   if (!confirmed) return;
 
@@ -506,6 +604,8 @@ async function clearPlayersList() {
 }
 
 async function resetData() {
+  if (!(await ensureActiveContext())) return;
+
   const confirmed = window.confirm("Se reiniciará la temporada completa. Se borrarán jugadores, equipos y partidos y no habrá forma de recuperar la información. ¿Continuás?");
   if (!confirmed) return;
 
@@ -532,6 +632,26 @@ seasonSelect.addEventListener("change", changeCurrentSeason);
 newGroupBtn.addEventListener("click", createGroup);
 newSeasonBtn.addEventListener("click", createSeason);
 createGroupGateBtn.addEventListener("click", createGroupFromGate);
+enterAppBtn.addEventListener("click", async () => {
+  const groupId = Number(selectedGateGroupId || groupSelect.value || 0);
+  const seasonId = Number(gateSeasonSelect.value || 0);
+
+  if (!groupId || !seasonId) {
+    alert("Elegí primero un grupo y una temporada.");
+    return;
+  }
+
+  try {
+    await fetchJson(`${apiUrl}/config`, {
+      method: "POST",
+      body: JSON.stringify({ current_group_id: groupId, current_season_id: seasonId }),
+    });
+    showAppShell(true);
+    await loadData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
 document.getElementById("saveSeasonBtn").addEventListener("click", async () => {
   const newSeason = seasonInput.value.trim();
   if (!newSeason) return;
@@ -547,6 +667,11 @@ document.getElementById("saveSeasonBtn").addEventListener("click", async () => {
   }
 });
 
+gateSeasonSelect.addEventListener("change", () => {
+  const seasonId = Number(gateSeasonSelect.value || 0);
+  enterAppBtn.disabled = !seasonId;
+});
+
 playerNameInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") addPlayer();
 });
@@ -556,7 +681,7 @@ playerNameInput.addEventListener("keydown", (event) => {
     const groups = await fetchJson(`${apiUrl}/groups`);
     renderGroupGate(groups);
     const config = await fetchJson(`${apiUrl}/config`);
-    if (config.current_group_id) {
+    if (config.current_group_id && config.current_season_id) {
       showAppShell(true);
       await loadData();
       return;

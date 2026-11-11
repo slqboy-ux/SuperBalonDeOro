@@ -405,6 +405,23 @@ def create_player(payload: dict[str, str]) -> dict[str, Any]:
     return {"id": cursor.lastrowid, "name": name, "group_id": current_group_id}
 
 
+@app.delete("/players/{player_id}")
+def delete_player(player_id: int) -> dict[str, str | int]:
+    current_group_id = get_current_group_id()
+    with get_conn() as conn:
+        player = conn.execute(
+            "SELECT id FROM players WHERE id = ? AND group_id = ?",
+            (player_id, current_group_id),
+        ).fetchone()
+        if player is None:
+            raise HTTPException(status_code=404, detail="Jugador no encontrado")
+
+        conn.execute("DELETE FROM team_players WHERE player_id = ?", (player_id,))
+        conn.execute("DELETE FROM players WHERE id = ? AND group_id = ?", (player_id, current_group_id))
+        conn.commit()
+    return {"status": "player_removed", "player_id": player_id}
+
+
 @app.delete("/players")
 def delete_players() -> dict[str, str]:
     current_group_id = get_current_group_id()

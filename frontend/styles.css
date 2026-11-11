@@ -84,6 +84,19 @@ select {
   color: var(--muted);
 }
 
+.gate-context {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0 18px;
+}
+
+.gate-context label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .group-create-box {
   display: grid;
   gap: 10px;
@@ -93,6 +106,11 @@ select {
 
 .gate-card h2 {
   margin-bottom: 0;
+}
+
+.primary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .app-shell {
