@@ -9,8 +9,10 @@
   <body>
     <div id="groupGate" class="gate-screen">
       <div class="gate-card">
-        <p class="eyebrow">Acceso</p>
-        <h2>Elegí tu grupo</h2>
+        <div class="gate-brand-block">
+          <p class="eyebrow">SUPER BALON DE ORO</p>
+          <h1>Elegí tu grupo</h1>
+        </div>
         <div id="groupGateList" class="group-gate-list"></div>
 
         <div class="gate-context">
@@ -44,8 +46,6 @@
         </div>
         <div class="topbar-actions">
           <button id="changeGroupBtn" class="ghost-btn small-btn" type="button">Cambiar grupo</button>
-          <button id="clearPlayersBtn" class="ghost-btn small-btn" type="button">Vaciar lista</button>
-          <button id="resetBtn" class="danger-btn">Reiniciar temporada</button>
         </div>
       </header>
 
@@ -115,18 +115,18 @@
           </div>
 
           <div class="bulk-box">
-            <label for="bulkPlayersInput">Pegá la lista de tus amigos</label>
-            <p class="helper-text">No hace falta cargar uno por uno. Pega la lista del grupo y listo.</p>
+            <label for="bulkPlayersInput">Cargar lista completa desde texto</label>
+            <p class="helper-text">Esto reemplaza la lista actual. Usá esta opción solo si querés empezar de cero o cambiar toda la nómina.</p>
             <textarea id="bulkPlayersInput" placeholder="Dani, Javi, Leo&#10;Tomi&#10;Nico&#10;1. Bruno&#10;2. Ove"></textarea>
             <div class="bulk-actions">
-              <button id="bulkAddPlayersBtn" type="button">Cargar lista</button>
+              <button id="bulkAddPlayersBtn" type="button">Reemplazar lista</button>
               <button id="copyPlayersBtn" class="ghost-btn" type="button">Copiar lista</button>
             </div>
           </div>
 
           <div class="row single-input">
             <input id="playerName" type="text" placeholder="Nombre del jugador" />
-            <button id="addPlayerBtn">Agregar</button>
+            <button id="addPlayerBtn">Agregar jugador</button>
           </div>
           <ul id="playerList" class="list"></ul>
         </section>
@@ -151,6 +151,12 @@
             <p class="eyebrow">Paso 3</p>
             <h2>Guardar resultado</h2>
           </div>
+          <div class="match-meta-grid">
+            <input id="matchDate" type="datetime-local" />
+            <input id="matchLocation" type="text" placeholder="Lugar del partido" />
+          </div>
+          <input id="matchNotes" type="text" placeholder="Comentario especial (ej.: equipo 1 remera roja, premio, etc.)" />
+
           <div class="result-form">
             <select id="homeTeamSelect"></select>
             <input id="homeGoals" type="number" min="0" value="0" />
@@ -191,6 +197,14 @@
           </table>
         </section>
       </main>
+
+      <div class="danger-zone">
+        <div class="danger-zone-header">
+          <p class="eyebrow">Zona avanzada</p>
+          <h3>Acciones delicadas</h3>
+        </div>
+        <button id="resetBtn" class="danger-btn danger-zone-btn" type="button">Reiniciar temporada</button>
+      </div>
     </div>
 
     <script src="app.js"></script>
