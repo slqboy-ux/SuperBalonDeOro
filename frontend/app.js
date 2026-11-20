@@ -33,10 +33,44 @@ const gateSeasonSelect = document.getElementById("gateSeasonSelect");
 const enterAppBtn = document.getElementById("enterAppBtn");
 const changeGroupBtn = document.getElementById("changeGroupBtn");
 
+// Grupo/temporada activos de ESTE dispositivo. Se guardan en localStorage y se
+// mandan en cada request (X-Group-Id / X-Season-Id); el servidor no guarda nada
+// global, así cada teléfono tiene su propio contexto.
+const CONTEXT_STORAGE_KEY = "hayequipo.context";
+const deviceContext = { groupId: 0, seasonId: 0 };
+
+function loadDeviceContext() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(CONTEXT_STORAGE_KEY) || "null");
+    if (stored) {
+      deviceContext.groupId = Number(stored.groupId) || 0;
+      deviceContext.seasonId = Number(stored.seasonId) || 0;
+    }
+  } catch {
+    // Sin storage disponible: el contexto queda sólo en memoria.
+  }
+}
+
+function setDeviceContext(groupId, seasonId) {
+  deviceContext.groupId = Number(groupId) || 0;
+  deviceContext.seasonId = Number(seasonId) || 0;
+  try {
+    localStorage.setItem(CONTEXT_STORAGE_KEY, JSON.stringify(deviceContext));
+  } catch {
+    // Ignorado: seguimos con el contexto en memoria.
+  }
+}
+
+loadDeviceContext();
+
 async function fetchJson(url, options = {}) {
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  if (deviceContext.groupId) headers["X-Group-Id"] = String(deviceContext.groupId);
+  if (deviceContext.seasonId) headers["X-Season-Id"] = String(deviceContext.seasonId);
+
   const response = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers,
   });
 
   if (!response.ok) {
@@ -219,7 +253,7 @@ async function renderGateSeasons(groupId) {
 
   try {
     const currentConfig = await fetchJson(`${apiUrl}/config`);
-    const configGroupId = Number(currentConfig.current_group_id || groupId);
+    const configGroupId = Number(currentConfig.current_group_id || 0);
     if (!configGroupId) {
       gateSeasonSelect.innerHTML = '<option value="">Seleccioná un grupo primero</option>';
       gateSeasonSelect.disabled = true;
@@ -297,21 +331,18 @@ function renderGroupGate(groups) {
       if (!group) return;
 
       try {
+        let password = "";
         if (group.has_password) {
-          const password = window.prompt(`Ingresá la contraseña de "${group.name}"`);
+          password = window.prompt(`Ingresá la contraseña de "${group.name}"`);
           if (password === null) return;
-
-          await fetchJson(`${apiUrl}/groups/login`, {
-            method: "POST",
-            body: JSON.stringify({ group_id: groupId, password }),
-          });
-        } else {
-          await fetchJson(`${apiUrl}/config`, {
-            method: "POST",
-            body: JSON.stringify({ current_group_id: groupId }),
-          });
         }
 
+        const login = await fetchJson(`${apiUrl}/groups/login`, {
+          method: "POST",
+          body: JSON.stringify({ group_id: groupId, password }),
+        });
+
+        setDeviceContext(login.group_id, login.season_id);
         selectedGateGroupId = groupId;
         await renderGateSeasons(groupId);
       } catch (error) {
@@ -349,6 +380,7 @@ async function ensureActiveContext() {
   try {
     const config = await fetchJson(`${apiUrl}/config`);
     const hasSelection = Boolean(config.current_group_id && config.current_season_id);
+    setDeviceContext(config.current_group_id, config.current_season_id);
     if (!hasSelection) {
       alert("Elegí un grupo y una temporada antes de cargar jugadores o equipos.");
       showAppShell(false);
@@ -388,6 +420,9 @@ function applyMatchFormDefaults(matches) {
 async function loadData() {
   try {
     const config = await fetchJson(`${apiUrl}/config`);
+    // El servidor valida el contexto (p. ej. si la temporada no es del grupo,
+    // cae a la primera): guardamos lo que resolvió.
+    setDeviceContext(config.current_group_id, config.current_season_id);
     if (!config.current_group_id || !config.current_season_id) {
       showAppShell(false);
       return;
@@ -606,14 +641,7 @@ async function createGroup() {
       method: "POST",
       body: JSON.stringify({ name, password }),
     });
-    if (response.has_password) {
-      const enteredPassword = window.prompt(`Ingresá la contraseña para entrar a "${response.name}"`);
-      if (enteredPassword === null) return;
-      await fetchJson(`${apiUrl}/groups/login`, {
-        method: "POST",
-        body: JSON.stringify({ group_id: response.id, password: enteredPassword }),
-      });
-    }
+    setDeviceContext(response.id, response.season_id);
     showAppShell(true);
     loadData();
   } catch (error) {
@@ -634,12 +662,7 @@ async function createGroupFromGate() {
       method: "POST",
       body: JSON.stringify({ name, password }),
     });
-    if (response.has_password) {
-      await fetchJson(`${apiUrl}/groups/login`, {
-        method: "POST",
-        body: JSON.stringify({ group_id: response.id, password }),
-      });
-    }
+    setDeviceContext(response.id, response.season_id);
     selectedGateGroupId = response.id;
     newGroupNameInput.value = "";
     newGroupPasswordInput.value = "";
@@ -658,13 +681,14 @@ async function createSeason() {
   if (!name) return;
 
   try {
-    await fetchJson(`${apiUrl}/seasons`, {
+    const season = await fetchJson(`${apiUrl}/seasons`, {
       method: "POST",
       body: JSON.stringify({
         group_id: selectedGroupId || undefined,
         name,
       }),
     });
+    setDeviceContext(season.group_id, season.id);
     loadData();
   } catch (error) {
     alert(error.message);
@@ -675,41 +699,21 @@ async function changeCurrentGroup() {
   const groupId = Number(groupSelect.value);
   if (!groupId) return;
 
-  try {
-    await fetchJson(`${apiUrl}/config`, {
-      method: "POST",
-      body: JSON.stringify({ current_group_id: String(groupId) }),
-    });
-    loadData();
-  } catch (error) {
-    alert(error.message);
-  }
+  // Temporada en 0: el servidor resuelve la primera del grupo nuevo.
+  setDeviceContext(groupId, 0);
+  loadData();
 }
 
 async function changeCurrentSeason() {
   const seasonId = Number(seasonSelect.value);
   if (!seasonId) return;
 
-  try {
-    await fetchJson(`${apiUrl}/config`, {
-      method: "POST",
-      body: JSON.stringify({ current_season_id: String(seasonId) }),
-    });
-    loadData();
-  } catch (error) {
-    alert(error.message);
-  }
+  setDeviceContext(deviceContext.groupId, seasonId);
+  loadData();
 }
 
 async function returnToGroupSelection() {
-  try {
-    await fetchJson(`${apiUrl}/config`, {
-      method: "POST",
-      body: JSON.stringify({ current_group_id: "0", current_season_id: "0" }),
-    });
-  } catch (error) {
-    console.error(error);
-  }
+  setDeviceContext(0, 0);
 
   selectedGateGroupId = null;
   gateSeasonSelect.innerHTML = '<option value="">Seleccioná un grupo primero</option>';
@@ -765,13 +769,7 @@ enterAppBtn.addEventListener("click", async () => {
   }
 
   try {
-    await fetchJson(`${apiUrl}/config`, {
-      method: "POST",
-      body: JSON.stringify({
-        current_group_id: String(groupId),
-        current_season_id: String(seasonId),
-      }),
-    });
+    setDeviceContext(groupId, seasonId);
     showAppShell(true);
     await loadData();
   } catch (error) {
@@ -806,7 +804,12 @@ playerNameInput.addEventListener("keydown", (event) => {
   try {
     const groups = await fetchJson(`${apiUrl}/groups`);
     renderGroupGate(groups);
+    if (!deviceContext.groupId) {
+      showAppShell(false);
+      return;
+    }
     const config = await fetchJson(`${apiUrl}/config`);
+    setDeviceContext(config.current_group_id, config.current_season_id);
     if (config.current_group_id && config.current_season_id) {
       showAppShell(true);
       await loadData();

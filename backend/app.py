@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import random
 import sqlite3
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,46 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Contexto activo (grupo/temporada) POR DISPOSITIVO: el cliente lo guarda en su
+# localStorage y lo manda en cada request vía headers. Nunca se guarda global en
+# el servidor, así dos grupos usando la app a la vez no se pisan.
+GROUP_HEADER = b"x-group-id"
+SEASON_HEADER = b"x-season-id"
+_requested_group_id: ContextVar[int] = ContextVar("requested_group_id", default=0)
+_requested_season_id: ContextVar[int] = ContextVar("requested_season_id", default=0)
+
+
+def _parse_positive_int(raw: Any) -> int:
+    try:
+        parsed = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return 0
+    return parsed if parsed > 0 else 0
+
+
+class DeviceContextMiddleware:
+    """ASGI middleware que toma X-Group-Id / X-Season-Id y los deja en ContextVars."""
+
+    def __init__(self, app: Any) -> None:
+        self.inner_app = app
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.inner_app(scope, receive, send)
+            return
+        headers = dict(scope.get("headers") or [])
+        group_token = _requested_group_id.set(_parse_positive_int(headers.get(GROUP_HEADER, b"").decode("latin-1")))
+        season_token = _requested_season_id.set(_parse_positive_int(headers.get(SEASON_HEADER, b"").decode("latin-1")))
+        try:
+            await self.inner_app(scope, receive, send)
+        finally:
+            _requested_group_id.reset(group_token)
+            _requested_season_id.reset(season_token)
+
+
+app.add_middleware(DeviceContextMiddleware)
 
 
 def normalize_query(query: str, params: Any) -> tuple[str, Any]:
@@ -280,17 +321,27 @@ def health() -> dict[str, str]:
 
 
 def get_current_group_id() -> int:
+    group_id = _requested_group_id.get()
+    if group_id <= 0:
+        return 0
     with get_conn() as conn:
-        value = conn.execute(
-            "SELECT value FROM settings WHERE key = 'current_group_id'"
-        ).fetchone()
-    if value is None or (value["value"] is None):
-        return 0
-    try:
-        parsed = int(str(value["value"]).strip())
-    except (TypeError, ValueError):
-        return 0
-    return parsed if parsed > 0 else 0
+        row = conn.execute("SELECT id FROM groups WHERE id = ?", (group_id,)).fetchone()
+    return group_id if row is not None else 0
+
+
+def require_group_id() -> int:
+    group_id = get_current_group_id()
+    if group_id <= 0:
+        raise HTTPException(status_code=400, detail="Elegí un grupo y una temporada antes de continuar")
+    return group_id
+
+
+def require_season_id() -> int:
+    require_group_id()
+    season_id = get_current_season_id()
+    if season_id <= 0:
+        raise HTTPException(status_code=400, detail="Elegí un grupo y una temporada antes de continuar")
+    return season_id
 
 
 def get_group_name(group_id: int | None = None) -> str:
@@ -305,24 +356,18 @@ def get_group_name(group_id: int | None = None) -> str:
 
 def get_current_season_id() -> int:
     current_group_id = get_current_group_id()
+    if current_group_id <= 0:
+        return 0
+    season_id = _requested_season_id.get()
     with get_conn() as conn:
-        value = conn.execute(
-            "SELECT value FROM settings WHERE key = 'current_season_id'"
-        ).fetchone()
-        if value is None or (value["value"] is None):
-            return 0
-        try:
-            season_id = int(str(value["value"]).strip())
-        except (TypeError, ValueError):
-            return 0
-        season = conn.execute(
-            "SELECT id FROM seasons WHERE id = ? AND group_id = ?",
-            (season_id, current_group_id),
-        ).fetchone()
-        if season is not None:
-            return int(season["id"])
-        if current_group_id <= 0:
-            return 0
+        if season_id > 0:
+            season = conn.execute(
+                "SELECT id FROM seasons WHERE id = ? AND group_id = ?",
+                (season_id, current_group_id),
+            ).fetchone()
+            if season is not None:
+                return int(season["id"])
+        # Sin temporada (o una que no es de este grupo): la primera del grupo.
         fallback = conn.execute(
             "SELECT id FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
             (current_group_id,),
@@ -379,22 +424,25 @@ def update_config(payload: dict[str, Any]) -> dict[str, str | int]:
             raise HTTPException(status_code=400, detail=f"{field_name} inválido")
         return parsed
 
+    # El grupo/temporada activos ya no se guardan en el servidor: si vienen en el
+    # body sólo se usan para resolver/validar el contexto de ESTE request (el
+    # cliente los guarda en su dispositivo con lo que devuelve la respuesta).
+    if current_group_id is not None and current_group_id != "":
+        group_id = parse_non_negative_int(current_group_id, "current_group_id")
+        _requested_group_id.set(group_id)
+        if current_season_id is None or current_season_id == "":
+            _requested_season_id.set(0)
+    if current_season_id is not None and current_season_id != "":
+        season_id = parse_non_negative_int(current_season_id, "current_season_id")
+        _requested_season_id.set(season_id)
+
     with get_conn() as conn:
         if season_name:
-            selected_season_id = parse_non_negative_int(current_season_id, "current_season_id") if current_season_id else get_current_season_id()
-            exists = conn.execute(
-                "SELECT 1 FROM seasons WHERE id = ? AND group_id = ?",
-                (selected_season_id, get_current_group_id()),
-            ).fetchone()
-            if exists:
+            selected_season_id = get_current_season_id()
+            if selected_season_id > 0:
                 conn.execute(
-                    "UPDATE seasons SET name = ? WHERE id = ?",
-                    (season_name, selected_season_id),
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO settings (key, value) VALUES ('season_name', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                    (season_name,),
+                    "UPDATE seasons SET name = ? WHERE id = ? AND group_id = ?",
+                    (season_name, selected_season_id, get_current_group_id()),
                 )
         if tagline:
             conn.execute(
@@ -406,27 +454,6 @@ def update_config(payload: dict[str, Any]) -> dict[str, str | int]:
                 "INSERT INTO settings (key, value) VALUES ('brand', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (brand,),
             )
-        if current_group_id is not None and current_group_id != "":
-            group_id = parse_non_negative_int(current_group_id, "current_group_id")
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('current_group_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                (str(group_id),),
-            )
-        if current_season_id is not None and current_season_id != "":
-            season_id = parse_non_negative_int(current_season_id, "current_season_id")
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('current_season_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                (str(season_id),),
-            )
-            season_row = conn.execute(
-                "SELECT group_id FROM seasons WHERE id = ?",
-                (season_id,),
-            ).fetchone()
-            if season_row:
-                conn.execute(
-                    "INSERT INTO settings (key, value) VALUES ('current_group_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                    (str(season_row["group_id"]),),
-                )
         conn.commit()
 
     return get_config()
@@ -449,7 +476,7 @@ def create_player(payload: dict[str, str]) -> dict[str, Any]:
     if not name:
         raise HTTPException(status_code=400, detail="El nombre no puede estar vacío")
 
-    current_group_id = get_current_group_id()
+    current_group_id = require_group_id()
     with get_conn() as conn:
         try:
             cursor = conn.execute(
@@ -486,7 +513,7 @@ def delete_player(player_id: int) -> dict[str, str | int]:
 
 @app.delete("/players")
 def delete_players() -> dict[str, str]:
-    current_group_id = get_current_group_id()
+    current_group_id = require_group_id()
     with get_conn() as conn:
         team_ids = conn.execute(
             "SELECT id FROM teams WHERE group_id = ?",
@@ -537,8 +564,8 @@ def get_teams() -> list[dict[str, Any]]:
 def generate_teams(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     data = payload or {}
     team_size = int(data.get("team_size") or 2)
-    current_group_id = get_current_group_id()
-    current_season_id = get_current_season_id()
+    current_group_id = require_group_id()
+    current_season_id = require_season_id()
     if team_size < 1:
         raise HTTPException(status_code=400, detail="El tamaño del equipo debe ser mayor a 0")
 
@@ -627,8 +654,8 @@ def get_matches() -> list[dict[str, Any]]:
 
 @app.post("/matches")
 def add_match(payload: dict[str, Any]) -> dict[str, Any]:
-    current_group_id = get_current_group_id()
-    current_season_id = get_current_season_id()
+    current_group_id = require_group_id()
+    current_season_id = require_season_id()
     home_team_id = int(payload.get("home_team_id") or 0)
     away_team_id = int(payload.get("away_team_id") or 0)
     home_goals = int(payload.get("home_goals") or 0)
@@ -819,13 +846,8 @@ def login_group(payload: dict[str, Any]) -> dict[str, Any]:
             "SELECT id FROM seasons WHERE group_id = ? ORDER BY id ASC LIMIT 1",
             (group_id,),
         ).fetchone()
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES ('current_group_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (str(group_id),),
-        )
-        conn.commit()
 
-    return {"ok": True, "group_id": group_id}
+    return {"ok": True, "group_id": group_id, "season_id": int(season["id"]) if season else 0}
 
 
 @app.post("/groups")
@@ -843,10 +865,6 @@ def create_group(payload: dict[str, str]) -> dict[str, Any]:
             "INSERT INTO seasons (group_id, name) VALUES (?, ?)",
             (group_id, season_name),
         )
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            ("current_group_id", str(group_id)),
-        )
         conn.commit()
     return {"id": group_id, "name": name, "password": password, "has_password": bool(password), "season_id": last_insert_id(season_cursor)}
 
@@ -863,24 +881,19 @@ def get_seasons() -> list[dict[str, Any]]:
 
 
 @app.post("/seasons")
-def create_season(payload: dict[str, str]) -> dict[str, Any]:
-    group_id = int(payload.get("group_id") or get_current_group_id())
+def create_season(payload: dict[str, Any]) -> dict[str, Any]:
+    group_id = _parse_positive_int(payload.get("group_id")) or get_current_group_id()
     name = (payload.get("name") or "").strip() or "Primer Temporada"
     with get_conn() as conn:
+        if group_id <= 0 or conn.execute("SELECT 1 FROM groups WHERE id = ?", (group_id,)).fetchone() is None:
+            raise HTTPException(status_code=400, detail="Elegí un grupo antes de crear una temporada")
         cursor = conn.execute(
-            "INSERT INTO seasons (group_id, name) VALUES (?, ?)",
+            "INSERT INTO seasons (group_id, name) VALUES (?, ?) RETURNING id",
             (group_id, name),
         )
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            ("current_group_id", str(group_id)),
-        )
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            ("current_season_id", str(last_insert_id(cursor))),
-        )
+        season_id = last_insert_id(cursor)
         conn.commit()
-    return {"id": last_insert_id(cursor), "group_id": group_id, "name": name}
+    return {"id": season_id, "group_id": group_id, "name": name}
 
 
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")
