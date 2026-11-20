@@ -124,6 +124,22 @@ function renderTeams(teams) {
     .join("");
 }
 
+function formatMatchDate(rawValue) {
+  if (!rawValue) return "";
+
+  const value = rawValue.includes("T") ? rawValue : `${rawValue.slice(0, 10)}T${rawValue.slice(11, 16) || "00:00"}`;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return rawValue;
+
+  return date.toLocaleString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function renderMatches(matches) {
   if (!matches.length) {
     matchList.innerHTML = "<li>No hay resultados cargados todavía.</li>";
@@ -131,13 +147,25 @@ function renderMatches(matches) {
   }
 
   matchList.innerHTML = matches
-    .map(
-      (match) => `
-        <li>
-          ${match.home_name} ${match.home_goals} - ${match.away_goals} ${match.away_name}
+    .map((match) => {
+      const meta = [];
+      if (match.played_at) meta.push(formatMatchDate(match.played_at));
+      if (match.location) meta.push(`Lugar: ${match.location}`);
+
+      const homePlayers = Array.isArray(match.home_players) ? match.home_players.join(", ") : "";
+      const awayPlayers = Array.isArray(match.away_players) ? match.away_players.join(", ") : "";
+      const observationText = match.notes ? `Observaciones: ${match.notes}` : "";
+
+      return `
+        <li class="match-item">
+          <span class="match-result">${match.home_name} ${match.home_goals} - ${match.away_goals} ${match.away_name}</span>
+          ${meta.length ? `<span class="match-meta">${meta.join(" • ")}</span>` : ""}
+          ${homePlayers ? `<span class="match-meta"><strong>${match.home_name}:</strong> ${homePlayers}</span>` : ""}
+          ${awayPlayers ? `<span class="match-meta"><strong>${match.away_name}:</strong> ${awayPlayers}</span>` : ""}
+          ${observationText ? `<span class="match-note">${observationText}</span>` : ""}
         </li>
-      `
-    )
+      `;
+    })
     .join("");
 }
 
@@ -418,9 +446,14 @@ async function bulkAddPlayers() {
   if (!names.length) return;
 
   try {
-    await fetchJson(`${apiUrl}/players`, {
-      method: "DELETE",
-    });
+    const existingPlayers = await fetchJson(`${apiUrl}/players`);
+    if (existingPlayers.length > 0) {
+      const confirmed = window.confirm("La lista actual se reemplazará por la nueva. ¿Continuás?");
+      if (!confirmed) return;
+      await fetchJson(`${apiUrl}/players`, {
+        method: "DELETE",
+      });
+    }
 
     await Promise.all(
       names.map((name) =>
@@ -504,6 +537,9 @@ async function saveMatch() {
   const awayTeamId = Number(awayTeamSelect.value);
   const homeGoals = Number(document.getElementById("homeGoals").value || 0);
   const awayGoals = Number(document.getElementById("awayGoals").value || 0);
+  const matchDate = document.getElementById("matchDate").value;
+  const matchLocation = document.getElementById("matchLocation").value.trim();
+  const matchNotes = document.getElementById("matchNotes").value.trim();
 
   if (homeTeamId === awayTeamId) {
     alert("Elegí dos equipos distintos.");
@@ -518,11 +554,17 @@ async function saveMatch() {
         away_team_id: awayTeamId,
         home_goals: homeGoals,
         away_goals: awayGoals,
+        match_date: matchDate,
+        location: matchLocation,
+        notes: matchNotes,
       }),
     });
 
     document.getElementById("homeGoals").value = 0;
     document.getElementById("awayGoals").value = 0;
+    document.getElementById("matchDate").value = "";
+    document.getElementById("matchLocation").value = "";
+    document.getElementById("matchNotes").value = "";
     loadData();
   } catch (error) {
     alert(error.message);
@@ -700,7 +742,6 @@ document.getElementById("generateTeamsBtn").addEventListener("click", generateTe
 document.getElementById("shareTeamsBtn").addEventListener("click", shareTeamsOnWhatsapp);
 document.getElementById("saveMatchBtn").addEventListener("click", saveMatch);
 changeGroupBtn.addEventListener("click", returnToGroupSelection);
-document.getElementById("clearPlayersBtn").addEventListener("click", clearPlayersList);
 document.getElementById("resetBtn").addEventListener("click", resetData);
 groupSelect.addEventListener("change", changeCurrentGroup);
 seasonSelect.addEventListener("change", changeCurrentSeason);

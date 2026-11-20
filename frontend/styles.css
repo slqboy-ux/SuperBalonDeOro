@@ -121,6 +121,22 @@ select {
   font-weight: 700;
 }
 
+.gate-brand-block {
+  margin-bottom: 16px;
+}
+
+.gate-brand-block .eyebrow {
+  margin-bottom: 8px;
+  font-size: 0.76rem;
+  letter-spacing: 0.12em;
+}
+
+.gate-brand-block h1 {
+  margin: 0;
+  font-size: clamp(2.2rem, 4vw, 3.2rem);
+  letter-spacing: -0.05em;
+}
+
 .gate-card h2 {
   margin-bottom: 0;
 }
@@ -149,6 +165,20 @@ select {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.danger-zone {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.danger-zone-header {
+  margin-bottom: 12px;
+}
+
+.danger-zone-btn {
+  width: 100%;
 }
 
 .brand-wrap {
@@ -526,6 +556,18 @@ button:active {
   line-height: 1.6;
 }
 
+.match-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+#matchNotes {
+  width: 100%;
+  margin-bottom: 14px;
+}
+
 .result-form {
   display: grid;
   grid-template-columns: 1.4fr 70px 20px 70px 1.4fr auto;
@@ -547,6 +589,29 @@ button:active {
 
 .matches-box h3 {
   margin-bottom: 12px;
+}
+
+.match-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px;
+}
+
+.match-result {
+  font-weight: 700;
+}
+
+.match-meta {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.match-note {
+  color: var(--primary-strong);
+  font-size: 0.82rem;
+  line-height: 1.5;
 }
 
 table {
