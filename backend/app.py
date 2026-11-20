@@ -108,8 +108,10 @@ def last_insert_id(cursor: Any) -> Any:
     return None
 
 
-def ensure_column(table_name: str, column_name: str, column_sql: str) -> None:
-    with get_conn() as conn:
+def ensure_column(table_name: str, column_name: str, column_sql: str, conn: Any | None = None) -> None:
+    should_close = conn is None
+    conn = conn or get_conn()
+    try:
         if USE_POSTGRES:
             existing = conn.execute(
                 "SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = %s AND column_name = %s",
@@ -124,6 +126,9 @@ def ensure_column(table_name: str, column_name: str, column_sql: str) -> None:
         if not any(column[1] == column_name for column in columns):
             conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
         conn.commit()
+    finally:
+        if should_close:
+            conn.close()
 
 
 def init_db() -> None:
@@ -242,12 +247,14 @@ def init_db() -> None:
                     (existing_group["id"], "Primer Temporada"),
                 )
 
-        ensure_column("groups", "password", "TEXT DEFAULT ''")
-        ensure_column("players", "group_id", "INTEGER NOT NULL DEFAULT 1")
-        ensure_column("teams", "group_id", "INTEGER NOT NULL DEFAULT 1")
-        ensure_column("teams", "season_id", "INTEGER NOT NULL DEFAULT 1")
-        ensure_column("matches", "group_id", "INTEGER NOT NULL DEFAULT 1")
-        ensure_column("matches", "season_id", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column("groups", "password", "TEXT DEFAULT ''", conn)
+        ensure_column("players", "group_id", "INTEGER NOT NULL DEFAULT 1", conn)
+        ensure_column("teams", "group_id", "INTEGER NOT NULL DEFAULT 1", conn)
+        ensure_column("teams", "season_id", "INTEGER NOT NULL DEFAULT 1", conn)
+        ensure_column("matches", "group_id", "INTEGER NOT NULL DEFAULT 1", conn)
+        ensure_column("matches", "season_id", "INTEGER NOT NULL DEFAULT 1", conn)
+        ensure_column("matches", "location", "TEXT DEFAULT ''", conn)
+        ensure_column("matches", "notes", "TEXT DEFAULT ''", conn)
 
         conn.execute(
             "UPDATE players SET group_id = COALESCE(group_id, 1) WHERE group_id IS NULL"
@@ -589,7 +596,7 @@ def get_matches() -> list[dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT m.id, m.home_team_id, m.away_team_id, m.home_goals, m.away_goals,
-                   ht.name AS home_name, at.name AS away_name, m.played_at
+                   ht.name AS home_name, at.name AS away_name, m.played_at, m.location, m.notes
             FROM matches m
             INNER JOIN teams ht ON ht.id = m.home_team_id
             INNER JOIN teams at ON at.id = m.away_team_id
@@ -598,7 +605,24 @@ def get_matches() -> list[dict[str, Any]]:
             """,
             (current_group_id, current_season_id),
         ).fetchall()
-    return [dict(row) for row in rows]
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            home_players = conn.execute(
+                "SELECT p.name FROM team_players tp INNER JOIN players p ON p.id = tp.player_id WHERE tp.team_id = ? ORDER BY p.name ASC",
+                (row["home_team_id"],),
+            ).fetchall()
+            away_players = conn.execute(
+                "SELECT p.name FROM team_players tp INNER JOIN players p ON p.id = tp.player_id WHERE tp.team_id = ? ORDER BY p.name ASC",
+                (row["away_team_id"],),
+            ).fetchall()
+
+            match = dict(row)
+            match["home_players"] = [player["name"] for player in home_players]
+            match["away_players"] = [player["name"] for player in away_players]
+            result.append(match)
+
+    return result
 
 
 @app.post("/matches")
@@ -609,6 +633,9 @@ def add_match(payload: dict[str, Any]) -> dict[str, Any]:
     away_team_id = int(payload.get("away_team_id") or 0)
     home_goals = int(payload.get("home_goals") or 0)
     away_goals = int(payload.get("away_goals") or 0)
+    match_date = (payload.get("match_date") or payload.get("played_at") or "").strip()
+    location = (payload.get("location") or "").strip()
+    notes = (payload.get("notes") or "").strip()
 
     if home_team_id == away_team_id:
         raise HTTPException(status_code=400, detail="El equipo local y visitante no pueden ser iguales")
@@ -625,10 +652,10 @@ def add_match(payload: dict[str, Any]) -> dict[str, Any]:
 
         cursor = conn.execute(
             """
-            INSERT INTO matches (group_id, season_id, home_team_id, away_team_id, home_goals, away_goals)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO matches (group_id, season_id, home_team_id, away_team_id, home_goals, away_goals, played_at, location, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (current_group_id, current_season_id, home_team_id, away_team_id, home_goals, away_goals),
+            (current_group_id, current_season_id, home_team_id, away_team_id, home_goals, away_goals, match_date, location, notes),
         )
         conn.commit()
 

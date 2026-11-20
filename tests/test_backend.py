@@ -77,6 +77,49 @@ class DeletePlayerEndpointTest(unittest.TestCase):
         finally:
             os.environ.pop("RAILWAY_ENVIRONMENT", None)
 
+    def test_match_payload_accepts_schedule_location_and_notes(self):
+        group_response = self.client.post("/groups", json={"name": "Grupo fixture", "password": ""})
+        self.assertEqual(group_response.status_code, 200)
+        group_id = group_response.json()["id"]
+
+        season_response = self.client.post("/seasons", json={"name": "Temporada prueba"})
+        self.assertEqual(season_response.status_code, 200)
+        season_id = season_response.json()["id"]
+        self.client.post("/config", json={"current_group_id": group_id, "current_season_id": season_id})
+
+        player_a = self.client.post("/players", json={"name": "Ana"})
+        player_b = self.client.post("/players", json={"name": "Beto"})
+        self.assertEqual(player_a.status_code, 200)
+        self.assertEqual(player_b.status_code, 200)
+
+        team_response = self.client.post("/teams/generate", json={"team_size": 1})
+        self.assertEqual(team_response.status_code, 200)
+        teams = self.client.get("/teams").json()
+        self.assertGreaterEqual(len(teams), 2)
+
+        response = self.client.post(
+            "/matches",
+            json={
+                "home_team_id": teams[0]["id"],
+                "away_team_id": teams[1]["id"],
+                "home_goals": 2,
+                "away_goals": 1,
+                "match_date": "2026-11-11T20:00",
+                "location": "Parque Rivadavia",
+                "notes": "Equipo 1 con remera roja",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+
+        matches = self.client.get("/matches").json()
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["location"], "Parque Rivadavia")
+        self.assertEqual(matches[0]["notes"], "Equipo 1 con remera roja")
+
+        all_players = matches[0]["home_players"] + matches[0]["away_players"]
+        self.assertIn("Ana", all_players)
+        self.assertIn("Beto", all_players)
+
 
 if __name__ == "__main__":
     unittest.main()

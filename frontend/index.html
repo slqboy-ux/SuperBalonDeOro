@@ -115,11 +115,11 @@
           </div>
 
           <div class="bulk-box">
-            <label for="bulkPlayersInput">Cargar lista completa desde texto</label>
-            <p class="helper-text">Esto reemplaza la lista actual. Usá esta opción solo si querés empezar de cero o cambiar toda la nómina.</p>
+            <label for="bulkPlayersInput">Pegar lista desde WhatsApp</label>
+            <p class="helper-text">Pegá los nombres (uno por línea o separados por coma; se ignoran números y viñetas). Se agregan a la lista actual y los que ya estén se saltan.</p>
             <textarea id="bulkPlayersInput" placeholder="Dani, Javi, Leo&#10;Tomi&#10;Nico&#10;1. Bruno&#10;2. Ove"></textarea>
             <div class="bulk-actions">
-              <button id="bulkAddPlayersBtn" type="button">Reemplazar lista</button>
+              <button id="bulkAddPlayersBtn" type="button">Agregar lista desde WhatsApp</button>
               <button id="copyPlayersBtn" class="ghost-btn" type="button">Copiar lista</button>
             </div>
           </div>
@@ -197,14 +197,6 @@
           </table>
         </section>
       </main>
-
-      <div class="danger-zone">
-        <div class="danger-zone-header">
-          <p class="eyebrow">Zona avanzada</p>
-          <h3>Acciones delicadas</h3>
-        </div>
-        <button id="resetBtn" class="danger-btn danger-zone-btn" type="button">Reiniciar temporada</button>
-      </div>
     </div>
 
     <script src="app.js"></script>

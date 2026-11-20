@@ -361,6 +361,30 @@ async function ensureActiveContext() {
   }
 }
 
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function todayForDatetimeLocal() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function applyMatchFormDefaults(matches) {
+  const dateInput = document.getElementById("matchDate");
+  if (dateInput && !dateInput.value) {
+    dateInput.value = todayForDatetimeLocal();
+  }
+
+  const locationInput = document.getElementById("matchLocation");
+  if (locationInput && !locationInput.value) {
+    const lastWithLocation = (matches || []).find((match) => match.location && match.location.trim());
+    if (lastWithLocation) {
+      locationInput.value = lastWithLocation.location;
+    }
+  }
+}
+
 async function loadData() {
   try {
     const config = await fetchJson(`${apiUrl}/config`);
@@ -395,6 +419,7 @@ async function loadData() {
     renderTeams(teams);
     populateTeamSelects(teams);
     renderMatches(matches);
+    applyMatchFormDefaults(matches);
     renderStandings(standings);
     shareTeamsBtn.disabled = teams.length === 0;
   } catch (error) {
@@ -445,30 +470,28 @@ async function bulkAddPlayers() {
   const names = parseBulkPlayers(rawText);
   if (!names.length) return;
 
-  try {
-    const existingPlayers = await fetchJson(`${apiUrl}/players`);
-    if (existingPlayers.length > 0) {
-      const confirmed = window.confirm("La lista actual se reemplazará por la nueva. ¿Continuás?");
-      if (!confirmed) return;
+  let added = 0;
+  let skipped = 0;
+  for (const name of names) {
+    try {
       await fetchJson(`${apiUrl}/players`, {
-        method: "DELETE",
+        method: "POST",
+        body: JSON.stringify({ name }),
       });
+      added += 1;
+    } catch {
+      // Ya existe en el grupo (u otro problema puntual): lo salteamos.
+      skipped += 1;
     }
-
-    await Promise.all(
-      names.map((name) =>
-        fetchJson(`${apiUrl}/players`, {
-          method: "POST",
-          body: JSON.stringify({ name }),
-        })
-      )
-    );
-
-    bulkPlayersInput.value = "";
-    loadData();
-  } catch (error) {
-    alert(error.message);
   }
+
+  bulkPlayersInput.value = "";
+  await loadData();
+
+  const parts = [];
+  if (added) parts.push(`${added} jugador${added === 1 ? "" : "es"} agregado${added === 1 ? "" : "s"}`);
+  if (skipped) parts.push(`${skipped} ya estaba${skipped === 1 ? "" : "n"} en la lista`);
+  if (parts.length) alert(parts.join(" · "));
 }
 
 async function copyPlayerList() {
@@ -719,21 +742,6 @@ async function clearPlayersList() {
   }
 }
 
-async function resetData() {
-  if (!(await ensureActiveContext())) return;
-
-  const confirmed = window.confirm("Se reiniciará la temporada completa. Se borrarán jugadores, equipos y partidos y no habrá forma de recuperar la información. ¿Continuás?");
-  if (!confirmed) return;
-
-  try {
-    await fetchJson(`${apiUrl}/players`, {
-      method: "DELETE",
-    });
-    loadData();
-  } catch (error) {
-    alert(error.message);
-  }
-}
 
 document.getElementById("addPlayerBtn").addEventListener("click", addPlayer);
 document.getElementById("bulkAddPlayersBtn").addEventListener("click", bulkAddPlayers);
@@ -742,7 +750,6 @@ document.getElementById("generateTeamsBtn").addEventListener("click", generateTe
 document.getElementById("shareTeamsBtn").addEventListener("click", shareTeamsOnWhatsapp);
 document.getElementById("saveMatchBtn").addEventListener("click", saveMatch);
 changeGroupBtn.addEventListener("click", returnToGroupSelection);
-document.getElementById("resetBtn").addEventListener("click", resetData);
 groupSelect.addEventListener("change", changeCurrentGroup);
 seasonSelect.addEventListener("change", changeCurrentSeason);
 newGroupBtn.addEventListener("click", createGroup);
