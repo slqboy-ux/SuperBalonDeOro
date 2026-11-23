@@ -558,9 +558,88 @@ async function generateTeams() {
   }
 }
 
+// Link público fijo (no window.location: en desarrollo sería localhost).
+const APP_SHARE_URL = "https://superbalon-mvp-production.up.railway.app/";
+
+function isAndroidWebView() {
+  return /; wv\)/.test(navigator.userAgent);
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const helper = document.createElement("textarea");
+    helper.value = text;
+    helper.setAttribute("readonly", "");
+    helper.style.position = "fixed";
+    helper.style.opacity = "0";
+    document.body.appendChild(helper);
+    helper.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      copied = false;
+    }
+    helper.remove();
+    return copied;
+  }
+}
+
+// Comparte un texto por el mejor canal disponible:
+// 1) app Android con el puente nativo → menú "Compartir" del sistema;
+// 2) navegador con Web Share (celulares) → menú nativo;
+// 3) navegador sin Web Share (PC) → WhatsApp en otra pestaña;
+// 4) WebView viejo sin puente (no puede abrir WhatsApp) → copia al portapapeles.
+async function shareText(text) {
+  if (window.AndroidShare && typeof window.AndroidShare.share === "function") {
+    window.AndroidShare.share(text);
+    return;
+  }
+
+  if (navigator.share) {
+    try {
+      await navigator.share({ text });
+      return;
+    } catch (error) {
+      if (error && error.name === "AbortError") return; // el usuario canceló
+    }
+  }
+
+  if (!isAndroidWebView()) {
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+    return;
+  }
+
+  if (await copyToClipboard(text)) {
+    alert("Mensaje copiado. Pegalo en WhatsApp para compartirlo.");
+  } else {
+    window.prompt("Copiá este mensaje y pegalo en WhatsApp:", text);
+  }
+}
+
+function buildInviteText() {
+  const lines = [
+    "¡Sumate al SUPERBALÓN DE ORO! ⚽🏆",
+    "Armamos equipos, cargamos los resultados y vemos quién se lleva la temporada.",
+  ];
+  const groupName = !appShell.classList.contains("hidden") && groupSelect.selectedOptions[0]?.textContent;
+  if (groupName) {
+    lines.push(`Entrá al grupo "${groupName}".`);
+  }
+  lines.push("", `Entrá acá: ${APP_SHARE_URL}`);
+  return lines.join("\n");
+}
+
+function inviteFriends() {
+  shareText(buildInviteText());
+}
+
 function buildTeamsShareText(teams) {
   const season = seasonNameEl.textContent || "Temporada";
-  const appLink = window.location.origin;
+  const appLink = APP_SHARE_URL;
   const lines = [
     `${season}`,
     "",
@@ -581,8 +660,7 @@ async function shareTeamsOnWhatsapp() {
       return;
     }
 
-    const text = encodeURIComponent(buildTeamsShareText(teams));
-    window.open(`https://wa.me/?text=${text}`, "_blank");
+    await shareText(buildTeamsShareText(teams));
   } catch (error) {
     alert("No se pudieron compartir los equipos.");
   }
@@ -754,6 +832,7 @@ document.getElementById("generateTeamsBtn").addEventListener("click", generateTe
 document.getElementById("shareTeamsBtn").addEventListener("click", shareTeamsOnWhatsapp);
 document.getElementById("saveMatchBtn").addEventListener("click", saveMatch);
 changeGroupBtn.addEventListener("click", returnToGroupSelection);
+document.querySelectorAll("[data-invite]").forEach((button) => button.addEventListener("click", inviteFriends));
 groupSelect.addEventListener("change", changeCurrentGroup);
 seasonSelect.addEventListener("change", changeCurrentSeason);
 newGroupBtn.addEventListener("click", createGroup);

@@ -758,3 +758,43 @@ tbody tr:hover {
     margin-top: 0;
   }
 }
+
+/* Invitar amigos */
+.invite-box {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(142, 240, 177, 0.35);
+  background: rgba(142, 240, 177, 0.08);
+}
+
+.invite-box div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 200px;
+}
+
+.invite-box strong {
+  color: var(--text);
+}
+
+.invite-box span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.invite-box .invite-btn {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 480px) {
+  .invite-box .invite-btn {
+    width: 100%;
+  }
+}
