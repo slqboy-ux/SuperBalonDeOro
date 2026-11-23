@@ -668,3 +668,93 @@ tbody tr:hover {
     justify-self: start;
   }
 }
+
+/* Pantalla de grupos: explicación del juego */
+.gate-pitch {
+  margin: 12px 0 0;
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.gate-pitch strong {
+  color: var(--primary-strong);
+}
+
+.gate-layout {
+  display: grid;
+  gap: 24px;
+}
+
+.gate-howto {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(142, 240, 177, 0.04);
+  padding: 18px 18px 6px;
+}
+
+.gate-howto h2 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+}
+
+.howto-steps {
+  list-style: none;
+  counter-reset: howto;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.howto-steps li {
+  counter-increment: howto;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: start;
+}
+
+.howto-steps li::before {
+  content: counter(howto);
+  grid-row: span 2;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--primary);
+  color: var(--bg);
+  font-weight: 800;
+  font-size: 0.85rem;
+}
+
+.howto-steps strong {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.howto-steps span {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+
+}
+
+@media (min-width: 900px) {
+  .gate-card {
+    width: min(1080px, 100%);
+    padding: 32px;
+  }
+
+  .gate-layout {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .gate-main .group-gate-list {
+    margin-top: 0;
+  }
+}
